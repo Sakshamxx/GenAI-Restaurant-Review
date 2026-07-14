@@ -1,0 +1,18 @@
+{
+  "label_to_int": {
+    "Cleanliness Issue": 0,
+    "Food Quality": 1,
+    "General Dissatisfaction": 2,
+    "Pricing Issue": 3,
+    "Service Delay": 4,
+    "Staff Behavior": 5
+  },
+  "int_to_label": {
+    "0": "Cleanliness Issue",
+    "1": "Food Quality",
+    "2": "General Dissatisfaction",
+    "3": "Pricing Issue",
+    "4": "Service Delay",
+    "5": "Staff Behavior"
+  }
+}

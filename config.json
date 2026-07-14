@@ -1,0 +1,10 @@
+{
+  "vocab_size": 15000,
+  "embed_dim": 128,
+  "num_heads": 4,
+  "ff_dim": 256,
+  "num_layers": 2,
+  "dropout": 0.2,
+  "max_len": 128,
+  "num_classes": 3
+}

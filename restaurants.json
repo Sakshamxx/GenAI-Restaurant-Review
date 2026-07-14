@@ -1,0 +1,29 @@
+{
+  "owner": {
+    "email": "[EMAIL_ADDRESS]",
+    "name": "Restaurant Owner"
+  },
+  "restaurants": [
+    {
+      "id": "violet-orchid",
+      "name": "The Violet Orchid",
+      "googleReviewUrl": "https://www.google.com/maps/place/Sandoz+Restaurant+-+Dbg+Road,+Karol+Bagh/@28.6534051,77.1561356,14z/data=!4m12!1m2!2m1!1ssandoz!3m8!1s0x390d029cc1655417:0xc3061f640d74db43!8m2!3d28.6534051!4d77.1921845!9m1!1b1!15sCgZzYW5kb3oiA4gBAVoIIgZzYW5kb3qSAQpyZXN0YXVyYW504AEA!16s%2Fg%2F11c6thm9dl?entry=ttu&g_ep=EgoyMDI2MDcwOC4wIKXMDSoASAFQAw%3D%3D",
+      "notificationEmail": "[EMAIL_ADDRESS]",
+      "tables": ["T1", "T2", "T3", "T4", "T5", "BAR", "PATIO"]
+    },
+    {
+      "id": "crimson-feast",
+      "name": "Crimson Feast",
+      "googleReviewUrl": "https://search.google.com/local/writereview?placeid=example2",
+      "notificationEmail": "[EMAIL_ADDRESS]",
+      "tables": ["T1", "T2", "T3", "BAR"]
+    },
+    {
+      "id": "azure-bites",
+      "name": "Azure Bites",
+      "googleReviewUrl": "https://search.google.com/local/writereview?placeid=example3",
+      "notificationEmail": "[EMAIL_ADDRESS]",
+      "tables": ["T1", "T2", "COUNTER"]
+    }
+  ]
+}

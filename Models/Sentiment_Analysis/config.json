@@ -1,0 +1,15 @@
+{
+  "model": "logreg (C=8)",
+  "test_accuracy": 0.8266666666666667,
+  "best_hyperparameters": {
+    "max_features": 15000.0,
+    "ngram_range": "(1, 2)",
+    "min_df": 3,
+    "max_df": 1.0,
+    "sublinear_tf": true,
+    "model_type": "logreg",
+    "C": 8,
+    "vocab_size": 15000,
+    "seconds": 1.99
+  }
+}

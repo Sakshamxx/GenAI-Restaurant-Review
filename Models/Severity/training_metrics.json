@@ -1,0 +1,104 @@
+{
+  "history": {
+    "train_loss": [
+      0.5162175998229671,
+      0.2893125588143313,
+      0.23665858418853195,
+      0.23728248874346416,
+      0.23753947033768608,
+      0.2300681546143202,
+      0.20758764962986032
+    ],
+    "val_loss": [
+      0.3139881273110708,
+      0.26924857092492377,
+      0.4107183250380151,
+      0.23196663621031208,
+      0.25492882596121896,
+      0.5788386056452621,
+      0.2865702056590422
+    ],
+    "train_acc": [
+      0.8093915343915344,
+      0.8898148148148148,
+      0.8958994708994709,
+      0.8984126984126984,
+      0.897089947089947,
+      0.899074074074074,
+      0.9034391534391535
+    ],
+    "val_acc": [
+      0.8734567901234568,
+      0.8919753086419753,
+      0.8777777777777778,
+      0.8925925925925926,
+      0.8888888888888888,
+      0.8592592592592593,
+      0.8876543209876543
+    ]
+  },
+  "training_duration_sec": 215.85,
+  "best_val_loss": 0.232,
+  "test_metrics": {
+    "model": "Transformer",
+    "accuracy": 0.8883,
+    "precision": 0.8903,
+    "recall": 0.8883,
+    "f1": 0.8888,
+    "macro_f1": 0.8888,
+    "weighted_f1": 0.8888,
+    "roc_auc_macro_ovr": 0.9886
+  },
+  "cross_validation": {
+    "mean_accuracy": 0.900462962962963,
+    "std_accuracy": 0.0034020690871988616,
+    "mean_f1_macro": 0.9001733352672613,
+    "std_f1_macro": 0.0033718214815557476
+  },
+  "baseline_results": [
+    {
+      "model": "TF-IDF + Logistic Regression",
+      "accuracy": 0.8994,
+      "precision": 0.9001,
+      "recall": 0.8994,
+      "f1": 0.8993,
+      "macro_f1": 0.8993,
+      "weighted_f1": 0.8993
+    },
+    {
+      "model": "TF-IDF + Random Forest",
+      "accuracy": 0.8802,
+      "precision": 0.8883,
+      "recall": 0.8802,
+      "f1": 0.8813,
+      "macro_f1": 0.8813,
+      "weighted_f1": 0.8813
+    }
+  ],
+  "model_comparison": [
+    {
+      "model": "TF-IDF + Logistic Regression",
+      "accuracy": 0.8994,
+      "precision": 0.9001,
+      "recall": 0.8994,
+      "macro_f1": 0.8993,
+      "weighted_f1": 0.8993
+    },
+    {
+      "model": "Transformer",
+      "accuracy": 0.8883,
+      "precision": 0.8903,
+      "recall": 0.8883,
+      "macro_f1": 0.8888,
+      "weighted_f1": 0.8888
+    },
+    {
+      "model": "TF-IDF + Random Forest",
+      "accuracy": 0.8802,
+      "precision": 0.8883,
+      "recall": 0.8802,
+      "macro_f1": 0.8813,
+      "weighted_f1": 0.8813
+    }
+  ]
+}
