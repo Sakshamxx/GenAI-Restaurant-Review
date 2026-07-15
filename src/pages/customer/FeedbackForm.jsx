@@ -53,23 +53,17 @@ export default function FeedbackForm() {
     const restaurantId = sessionStorage.getItem('reviewflow_restaurant_id') || null;
     const tableId = sessionStorage.getItem('reviewflow_table_id') || 'Unknown Table';
 
-    // Save to Supabase
+    // Save and notify via backend
     if (restaurantId) {
       await addFeedback({
         restaurantId,
         category: selectedTags[0] || 'General',
         severity: selectedTags.length > 2 ? 'high' : 'medium',
         feedbackText: comment,
+        feedbackCategories: selectedTags,
+        ratingSummary: `Food: ${ratings.food}/5, Service: ${ratings.service}/5, Ambience: ${ratings.ambience}/5`
       });
     }
-
-    // Send email notification to restaurant owner via backend
-    await submitFeedbackToBackend({
-      restaurantId: restaurantId || 'unknown',
-      tableNumber: tableId,
-      feedbackCategories: selectedTags,
-      feedbackMessage: comment,
-    });
 
     setSubmitted(true);
   };
@@ -189,7 +183,9 @@ export default function FeedbackForm() {
                   setComment('');
                   setSelectedTags([]);
                   setSubmitted(false);
-                  navigate('/');
+                  // Navigate back to the review page, not to '/' which redirects to login
+                  const rId = sessionStorage.getItem('reviewflow_restaurant_id');
+                  navigate(rId ? `/review/${rId}` : '/qr');
                 }}
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}

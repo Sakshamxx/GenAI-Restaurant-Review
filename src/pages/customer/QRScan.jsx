@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Star, Utensils, HeartHandshake, Home, Check, Sparkles, Lock } from 'lucide-react'
 import { supabase } from '../../lib/supabase.js'
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+
 const FOOD_TAGS = {
   positive: ['Delicious', 'Fresh', 'Authentic', 'Value for Money', 'Flavorful'],
   neutral: ['Average', 'Filling', 'Standard'],
@@ -32,15 +34,21 @@ export default function QRScan() {
   // Fetch restaurant from Supabase and store config in sessionStorage
   useEffect(() => {
     if (restaurantId) {
+      console.log('[QRScan] Found restaurantId in url params:', restaurantId);
       sessionStorage.setItem('reviewflow_restaurant_id', restaurantId);
     }
     if (tableId) {
+      console.log('[QRScan] Found tableId in url params:', tableId);
       sessionStorage.setItem('reviewflow_table_id', tableId);
     }
 
-    // Load restaurant details for display + google URL
+    // Load restaurant details for display + google URL, then increment scan count
     const loadRestaurant = async () => {
-      if (!restaurantId) return;
+      if (!restaurantId) {
+        console.warn('[QRScan] No restaurantId provided, skipping DB fetch.');
+        return;
+      }
+      console.log('[QRScan] Fetching restaurant info from Supabase for ID:', restaurantId);
       const { data } = await supabase
         .from('restaurants')
         .select('restaurant_name, google_review_link')
@@ -48,11 +56,30 @@ export default function QRScan() {
         .maybeSingle();
 
       if (data) {
+        console.log('[QRScan] Successfully fetched restaurant data:', data);
         setRestaurantName(data.restaurant_name || 'Restaurant');
         sessionStorage.setItem('reviewflow_restaurant_name', data.restaurant_name || '');
         if (data.google_review_link) {
+          console.log('[QRScan] Google Review Link stored in session:', data.google_review_link);
           sessionStorage.setItem('reviewflow_google_url', data.google_review_link);
+        } else {
+          console.warn('[QRScan] Google Review Link is missing or empty in restaurant record!');
         }
+        
+        // Fetch the local threshold override if configured on this browser
+        const localConfig = JSON.parse(localStorage.getItem('reviewflow_local_config') || '{}');
+        const threshold = localConfig.min_review_threshold ?? 4.0;
+        console.log('[QRScan] Storing local min_review_threshold override:', threshold);
+        sessionStorage.setItem('reviewflow_min_review_threshold', threshold.toString());
+
+        // Increment scan count on backend (fire-and-forget)
+        console.log('[QRScan] Incrementing scan count for restaurant:', restaurantId);
+        fetch(`${BACKEND_URL}/api/qr/scan/${restaurantId}`, { method: 'POST' })
+          .then(r => r.json())
+          .then(d => console.log('[QRScan] Scan incremented. Total scans:', d.total_scans))
+          .catch(e => console.warn('[QRScan] Could not increment scan count:', e.message));
+      } else {
+        console.error('[QRScan] Restaurant not found in DB for ID:', restaurantId);
       }
     };
 

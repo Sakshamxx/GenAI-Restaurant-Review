@@ -8,7 +8,7 @@ import {
   TrendingUp,
   Star
 } from 'lucide-react'
-import { getRestaurantStats, getReviews, getFeedback } from '../../services/supabase_db.js'
+import { getRestaurantStats, getReviews, getFeedback, getActivityLogs } from '../../services/supabase_db.js'
 import {
   AreaChart,
   Area,
@@ -29,6 +29,7 @@ export default function Overview() {
   });
   const [recentReviews, setRecentReviews] = useState([]);
   const [recentFeedback, setRecentFeedback] = useState([]);
+  const [activityLogs, setActivityLogs] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -40,17 +41,20 @@ export default function Overview() {
     const load = async () => {
       setLoading(true);
       try {
-        const [s, reviews, feedback] = await Promise.all([
+        const [s, reviews, feedback, logs] = await Promise.all([
           getRestaurantStats(restaurantId),
           getReviews(restaurantId),
           getFeedback(restaurantId),
+          getActivityLogs(restaurantId, 500),
         ]);
         console.log('[Overview] stats:', s);
         console.log('[Overview] reviews:', reviews);
         console.log('[Overview] feedback:', feedback);
+        console.log('[Overview] activity logs:', logs?.length);
         setStats(s);
         setRecentReviews(reviews.slice(0, 3));
         setRecentFeedback(feedback.slice(0, 3));
+        setActivityLogs(logs || []);
       } catch (err) {
         console.error('[Overview] load error:', err);
       } finally {
@@ -61,16 +65,25 @@ export default function Overview() {
     load();
   }, [restaurantId]);
 
-  // Weekly activity chart (stays as a visual placeholder)
-  const chartData = [
-    { name: 'Mon', Scans: 105, Reviews: 72 },
-    { name: 'Tue', Scans: 120, Reviews: 88 },
-    { name: 'Wed', Scans: 98, Reviews: 65 },
-    { name: 'Thu', Scans: 140, Reviews: 110 },
-    { name: 'Fri', Scans: 185, Reviews: 142 },
-    { name: 'Sat', Scans: 230, Reviews: 190 },
-    { name: 'Sun', Scans: 215, Reviews: 178 },
-  ];
+  // Build real chart data from activity_logs for the past 7 days
+  const chartData = React.useMemo(() => {
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const now = new Date();
+    // Create an ordered array for the last 7 days (oldest → newest)
+    const result = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(now);
+      d.setDate(d.getDate() - (6 - i));
+      return { name: days[d.getDay()], date: d.toDateString(), Scans: 0, Reviews: 0 };
+    });
+    activityLogs.forEach(log => {
+      const logDate = new Date(log.created_at);
+      const match = result.find(r => r.date === logDate.toDateString());
+      if (!match) return;
+      if (log.activity_type === 'qr_scanned') match.Scans += 1;
+      if (['positive_review', 'review_generated'].includes(log.activity_type)) match.Reviews += 1;
+    });
+    return result;
+  }, [activityLogs]);
 
   const cards = [
     {

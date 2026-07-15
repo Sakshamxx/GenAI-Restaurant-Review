@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles, ArrowRight, Edit3, CornerDownRight, Check } from 'lucide-react'
 import { generateMockReviewSuggestions, classifySentiment } from '../../services/ai.js'
-import { addReview, addFeedback } from '../../services/supabase_db.js'
+import { addReview, addFeedback, logActivity } from '../../services/supabase_db.js'
 
 export default function AISuggestions() {
   const navigate = useNavigate();
@@ -21,29 +21,65 @@ export default function AISuggestions() {
   // Sentiment prediction based on ratings and tags
   const [predictedSentiment, setPredictedSentiment] = useState(null);
 
+  // Sentinel to track if a blank-page error occurred
+  const [apiError, setApiError] = useState(null);
+
   useEffect(() => {
-    const savedRatings = sessionStorage.getItem('reviewflow_ratings');
-    const savedTags = sessionStorage.getItem('reviewflow_selected_tags');
-
+    // ─── Read sessionStorage with try/catch to prevent JSON.parse crashes ──
     let parsedRatings = { food: 5, service: 5, ambience: 5 };
-    let parsedTags = { food: [], service: [], ambience: [] };
+    let parsedTags    = { food: [], service: [], ambience: [] };
 
-    if (savedRatings) parsedRatings = JSON.parse(savedRatings);
-    if (savedTags) parsedTags = JSON.parse(savedTags);
+    try {
+      const savedRatings = sessionStorage.getItem('reviewflow_ratings');
+      const savedTags    = sessionStorage.getItem('reviewflow_selected_tags');
+      console.log('[AISuggestions] Loaded ratings:', savedRatings);
+      console.log('[AISuggestions] Loaded tags:',    savedTags);
+      if (savedRatings) parsedRatings = JSON.parse(savedRatings);
+      if (savedTags)    parsedTags    = JSON.parse(savedTags);
+    } catch (parseErr) {
+      console.error('[AISuggestions] sessionStorage parse error:', parseErr);
+      // continue with defaults — do not crash
+    }
 
     setRatings(parsedRatings);
     setSelectedTags(parsedTags);
 
-    // Call mock NLP sentiment classifier
-    const classification = classifySentiment(parsedRatings, parsedTags);
+    const thresholdVal = parseFloat(
+      sessionStorage.getItem('reviewflow_min_review_threshold') || '3.5'
+    );
+    console.log('[AISuggestions] Threshold:', thresholdVal);
+
+    const classification = classifySentiment(parsedRatings, parsedTags, thresholdVal);
+    console.log('[AISuggestions] Sentiment:', classification);
     setPredictedSentiment(classification);
 
-    // Generate mock AI reviews
-    generateMockReviewSuggestions(parsedRatings, parsedTags).then(result => {
-      setSuggestions(result);
-      setEditableText(result[0] || '');
-      setLoading(false);
-    });
+    const restaurantId = sessionStorage.getItem('reviewflow_restaurant_id') || null;
+    console.log('[AISuggestions] Calling generateMockReviewSuggestions for restaurant:', restaurantId);
+    generateMockReviewSuggestions(parsedRatings, parsedTags, restaurantId)
+      .then(result => {
+        console.log('[AISuggestions] AI result:', result);
+        // Validate result is a non-empty array of strings
+        if (Array.isArray(result) && result.length > 0 && typeof result[0] === 'string') {
+          setSuggestions(result);
+          setEditableText(result[0]);
+        } else {
+          console.warn('[AISuggestions] Unexpected result format, using emergency fallback');
+          const fallback = _emergencyFallback(parsedRatings);
+          setSuggestions(fallback);
+          setEditableText(fallback[0]);
+        }
+      })
+      .catch(err => {
+        console.error('[AISuggestions] generateMockReviewSuggestions failed:', err);
+        // NEVER leave the page blank — generate reviews client-side synchronously
+        const fallback = _emergencyFallback(parsedRatings);
+        setSuggestions(fallback);
+        setEditableText(fallback[0]);
+        setApiError('AI service unavailable. Using pre-generated suggestions.');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, []);
 
   const handleSelectSuggestion = (index) => {
@@ -106,12 +142,22 @@ export default function AISuggestions() {
         showToast('Review ready! Proceeding to Google Reviews.', 'info');
       }
 
-      // Open Google Reviews URL after short delay so toast is visible
-      setTimeout(() => {
-        if (googleUrl) {
-          window.open(googleUrl, '_blank', 'noopener,noreferrer');
+      // Open Google Reviews URL in the SAME tab after a short delay so toast is visible
+      setTimeout(async () => {
+        if (restaurantId) {
+          await logActivity({
+            restaurantId,
+            activityType: 'google_redirect',
+            customerName: 'Anonymous',
+            rating: overallRating,
+            reviewText: editableText
+          });
         }
-        navigate('/success');
+        if (googleUrl) {
+          window.location.href = googleUrl;
+        } else {
+          navigate('/success');
+        }
       }, 1500);
     }
   };
@@ -147,13 +193,24 @@ export default function AISuggestions() {
       showToast('Proceeding to Google Reviews.', 'info');
     }
 
-    setTimeout(() => {
-      if (googleUrl) {
-        window.open(googleUrl, '_blank', 'noopener,noreferrer');
+    setTimeout(async () => {
+      if (restaurantId) {
+        await logActivity({
+          restaurantId,
+          activityType: 'google_redirect',
+          customerName: 'Anonymous',
+          rating: overallRating,
+          reviewText: editableText
+        });
       }
-      navigate('/success');
+      if (googleUrl) {
+        window.location.href = googleUrl;
+      } else {
+        navigate('/success');
+      }
     }, 1200);
   };
+
 
   const forceNegativeFlow = () => {
     sessionStorage.setItem('reviewflow_draft_complaint', editableText);
@@ -176,6 +233,14 @@ export default function AISuggestions() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* API Error soft notice — shown but never blocks the review flow */}
+      {apiError && (
+        <div className="w-full max-w-xl mb-2 bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-2xl px-4 py-2.5 text-xs font-semibold text-center">
+          {apiError}
+        </div>
+      )}
+
       {/* Main Glassmorphism Card */}
       <motion.div 
         initial={{ opacity: 0, scale: 0.98 }}
@@ -210,32 +275,38 @@ export default function AISuggestions() {
           <div className="flex flex-col gap-5">
             {/* Suggestions list (Radio Group) */}
             <div className="flex flex-col gap-3">
-              {suggestions.map((text, idx) => (
-                <SpotlightCard
-                  key={idx}
-                  isSelected={selectedIndex === idx}
-                  onClick={() => handleSelectSuggestion(idx)}
-                >
-                  <div className="flex items-start gap-3">
-                    {/* Active Radio Indicator */}
-                    <div className="mt-1 flex-shrink-0">
-                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${
-                        selectedIndex === idx 
-                          ? 'border-brand-500 bg-brand-500/20' 
-                          : 'border-slate-600'
-                      }`}>
-                        {selectedIndex === idx && (
-                          <div className="w-2 h-2 rounded-full bg-brand-500" />
-                        )}
+              {Array.isArray(suggestions) && suggestions.length > 0 ? (
+                suggestions.map((text, idx) => (
+                  <SpotlightCard
+                    key={idx}
+                    isSelected={selectedIndex === idx}
+                    onClick={() => handleSelectSuggestion(idx)}
+                  >
+                    <div className="flex items-start gap-3">
+                      {/* Active Radio Indicator */}
+                      <div className="mt-1 flex-shrink-0">
+                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${
+                          selectedIndex === idx 
+                            ? 'border-brand-500 bg-brand-500/20' 
+                            : 'border-slate-600'
+                        }`}>
+                          {selectedIndex === idx && (
+                            <div className="w-2 h-2 rounded-full bg-brand-500" />
+                          )}
+                        </div>
                       </div>
+                      {/* Suggestion Text */}
+                      <p className="text-sm text-slate-200 leading-relaxed text-left font-normal select-text">
+                        "{text}"
+                      </p>
                     </div>
-                    {/* Suggestion Text */}
-                    <p className="text-sm text-slate-200 leading-relaxed text-left font-normal select-text">
-                      "{text}"
-                    </p>
-                  </div>
-                </SpotlightCard>
-              ))}
+                  </SpotlightCard>
+                ))
+              ) : (
+                <div className="text-center py-6 text-slate-400 text-xs">
+                  No review suggestions found. Feel free to write your own below.
+                </div>
+              )}
             </div>
 
             {/* Edit Review Section */}
@@ -357,4 +428,22 @@ function SpotlightCard({ children, isSelected, onClick }) {
       {children}
     </motion.button>
   );
+}
+
+// ─── Emergency in-memory fallback — guarantees non-blank suggestions ──────────────────
+// Called synchronously when both Gemini and the local mock both fail.
+function _emergencyFallback(ratings = {}) {
+  const avg = ((ratings.food || 5) + (ratings.service || 5) + (ratings.ambience || 5)) / 3;
+  if (avg >= 4) {
+    return [
+      'Had a fantastic experience here. The food was delicious, service was attentive, and the ambience was wonderful. Highly recommend this place!',
+      'Absolutely loved dining here. Everything from the food to the service was top-notch. Will definitely be coming back!',
+      'Wonderful restaurant with great food and friendly staff. The atmosphere was cozy and comfortable. Five stars!',
+    ];
+  }
+  return [
+    'Decent dining experience overall. The food was satisfying and the service was acceptable. A good spot for a casual meal.',
+    'Had an okay visit. The food was fine and service was standard. The ambience was comfortable enough for a relaxed meal.',
+    'Average experience but nothing exceptional. Food was satisfying, service was polite. Might give it another try.',
+  ];
 }

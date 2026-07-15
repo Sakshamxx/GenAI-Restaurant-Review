@@ -1,14 +1,17 @@
 """
 ReviewFlow AI — QR Code Routes
-Handles generation, download, list, and statistics of restaurant-wide QR codes using Supabase.
+Handles generation, download, preview, list, and statistics of restaurant QR codes.
+
+QR content is always restaurant.google_review_link — never a hardcoded localhost URL.
 """
 
+import re
 import httpx
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel
 from services.supabase_service import supabase_client
-from services.qr_service import generate_qr_png, get_qr_url
+from services.qr_service import generate_qr_png
 
 router = APIRouter(prefix="/api/qr", tags=["qr"])
 
@@ -17,97 +20,104 @@ class QRGenerateRequest(BaseModel):
     restaurant_id: str
 
 
+# ─── Helper ────────────────────────────────────────────────────────────────────
+
+def _get_restaurant(restaurant_id: str) -> dict:
+    """
+    Fetch the full restaurant row from Supabase.
+    Raises 404 if not found.
+    """
+    res = supabase_client.table("restaurants").select("*").eq("id", restaurant_id).execute()
+    if not res.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Restaurant {restaurant_id} not found.",
+        )
+    return res.data[0]
+
+
+# ─── Endpoints ─────────────────────────────────────────────────────────────────
+
 @router.get("/list")
 async def list_qr_codes(owner_id: str):
     """
-    Get all QR codes and metrics for restaurants owned by this owner.
-    Combines data from: restaurants, qr_codes, reviews, and feedback.
+    Return QR codes and metrics for all restaurants owned by this owner.
     """
     try:
-        # Fetch restaurants owned by owner
         rest_res = supabase_client.table("restaurants").select("*").eq("owner_id", owner_id).execute()
-        
         if not rest_res.data:
             return JSONResponse([])
 
         results = []
         for r in rest_res.data:
-            r_id = r["id"]
+            r_id   = r["id"]
             r_name = r["restaurant_name"]
 
-            # Fetch QR Code record
-            qr_res = supabase_client.table("qr_codes").select("*").eq("restaurant_id", r_id).execute()
-            qr_data = qr_res.data[0] if qr_res.data else None
+            qr_res   = supabase_client.table("qr_codes").select("*").eq("restaurant_id", r_id).execute()
+            qr_data  = qr_res.data[0] if qr_res.data else None
 
-            # Fetch Review counts & google redirects
-            rev_res = supabase_client.table("reviews").select("redirected_to_google").eq("restaurant_id", r_id).execute()
-            review_count = len(rev_res.data) if rev_res.data else 0
+            rev_res      = supabase_client.table("reviews").select("redirected_to_google").eq("restaurant_id", r_id).execute()
+            review_count  = len(rev_res.data) if rev_res.data else 0
             redirect_count = sum(1 for x in rev_res.data if x.get("redirected_to_google")) if rev_res.data else 0
 
-            # Fetch Private Feedback counts
-            feed_res = supabase_client.table("feedback").select("id").eq("restaurant_id", r_id).execute()
+            feed_res      = supabase_client.table("feedback").select("id").eq("restaurant_id", r_id).execute()
             feedback_count = len(feed_res.data) if feed_res.data else 0
 
             results.append({
-                "restaurant_id": r_id,
-                "restaurant_name": r_name,
-                "qr_id": qr_data["id"] if qr_data else None,
-                "qr_image_url": qr_data["qr_image_url"] if qr_data else "",
-                "total_scans": qr_data["total_scans"] if qr_data else 0,
-                "review_count": review_count,
-                "redirect_count": redirect_count,
-                "feedback_count": feedback_count
+                "restaurant_id":     r_id,
+                "restaurant_name":   r_name,
+                "google_review_link": r.get("google_review_link", ""),
+                "qr_id":             qr_data["id"] if qr_data else None,
+                "qr_image_url":      qr_data["qr_image_url"] if qr_data else "",
+                "total_scans":       qr_data["total_scans"] if qr_data else 0,
+                "review_count":      review_count,
+                "redirect_count":    redirect_count,
+                "feedback_count":    feedback_count,
             })
 
         return JSONResponse(results)
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[list_qr_codes] Error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/restaurants")
 async def get_restaurants(owner_id: str):
-    """
-    Get all restaurants owned by the current owner.
-    """
+    """Return all restaurants owned by this owner."""
     try:
         res = supabase_client.table("restaurants").select("*").eq("owner_id", owner_id).execute()
         return JSONResponse({"restaurants": res.data or []})
     except Exception as e:
         print(f"[get_restaurants] Error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/generate")
 async def generate_qr(request: QRGenerateRequest):
     """
-    Regenerates or generates a QR code for a restaurant.
-    Uploads to Supabase Storage, updates database record.
+    Generate (or regenerate) a QR code for a restaurant.
+    QR encodes restaurant.google_review_link.
+    Uploads PNG to Supabase Storage and upserts qr_codes record.
     """
     try:
-        # Get restaurant
-        rest_res = supabase_client.table("restaurants").select("*").eq("id", request.restaurant_id).execute()
-        if not rest_res.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Restaurant not found."
-            )
-
-        restaurant = rest_res.data[0]
+        restaurant    = _get_restaurant(request.restaurant_id)
         restaurant_id = restaurant["id"]
         restaurant_name = restaurant["restaurant_name"]
+        google_review_link = restaurant.get("google_review_link", "")
 
-        # Generate QR code
-        qr_bytes = generate_qr_png(restaurant_id, restaurant_name)
+        if not google_review_link:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="google_review_link is not set. Add it in Settings before generating a QR code.",
+            )
 
-        # Upload QR image to Supabase Storage
+        print(f"[generate_qr] Generating QR for {restaurant_name} → {google_review_link}")
+        qr_bytes = generate_qr_png(qr_url=google_review_link, restaurant_name=restaurant_name)
+
+        # Upload to Supabase Storage (overwrite existing)
         file_path = f"qr_{restaurant_id}.png"
         try:
             supabase_client.storage.from_("qr-codes").remove([file_path])
@@ -117,198 +127,177 @@ async def generate_qr(request: QRGenerateRequest):
         supabase_client.storage.from_("qr-codes").upload(
             path=file_path,
             file=qr_bytes,
-            file_options={"content-type": "image/png"}
+            file_options={"content-type": "image/png"},
         )
-
         public_url = supabase_client.storage.from_("qr-codes").get_public_url(file_path)
 
-        # Update or insert record in qr_codes
-        qr_check = supabase_client.table("qr_codes").select("*").eq("restaurant_id", restaurant_id).execute()
+        # Upsert qr_codes record
+        qr_check = supabase_client.table("qr_codes").select("id").eq("restaurant_id", restaurant_id).execute()
         if qr_check.data:
             supabase_client.table("qr_codes").update({
-                "qr_image_url": public_url
+                "qr_image_url": public_url,
             }).eq("restaurant_id", restaurant_id).execute()
         else:
             supabase_client.table("qr_codes").insert({
                 "restaurant_id": restaurant_id,
-                "qr_token": restaurant_id,
-                "qr_image_url": public_url,
-                "total_scans": 0
+                "qr_token":      restaurant_id,
+                "qr_image_url":  public_url,
+                "total_scans":   0,
             }).execute()
 
         return JSONResponse({
-            "success": True,
-            "message": "QR Code regenerated successfully.",
-            "qr_image_url": public_url
+            "success":       True,
+            "message":       "QR Code generated successfully.",
+            "qr_image_url":  public_url,
+            "qr_content":    google_review_link,
         })
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[generate_qr] Error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/preview/{restaurant_id}/{token}")
-async def preview_qr(restaurant_id: str, token: str):
+@router.get("/preview/{restaurant_id}")
+async def preview_qr(restaurant_id: str):
     """
-    Returns a QR code PNG for inline preview in the browser.
-    Generates the QR from the review URL encoded in the token — no Supabase Storage required.
+    Return a QR code PNG for inline preview.
+    QR encodes restaurant.google_review_link.
     """
     try:
-        from services.qr_service import get_qr_url
-        qr_url = get_qr_url(restaurant_id, token)
-        print(f"[preview_qr] restaurant_id={restaurant_id} token={token} url={qr_url}")
-        qr_bytes = generate_qr_png(restaurant_id, token)
+        restaurant         = _get_restaurant(restaurant_id)
+        restaurant_name    = restaurant["restaurant_name"]
+        google_review_link = restaurant.get("google_review_link", "")
+
+        if not google_review_link:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="google_review_link not set. Add it in Settings.",
+            )
+
+        print(f"[preview_qr] restaurant_id={restaurant_id} url={google_review_link}")
+        qr_bytes = generate_qr_png(qr_url=google_review_link, restaurant_name=restaurant_name)
+
         return Response(
             content=qr_bytes,
             media_type="image/png",
-            headers={"Cache-Control": "public, max-age=3600"},
+            headers={"Cache-Control": "no-cache"},
         )
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[preview_qr] Error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
-        )
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/download/{restaurant_id}/{token}")
-async def download_qr_with_token(restaurant_id: str, token: str):
-    """
-    Downloads the QR code PNG for the given restaurant/token combo.
-    This is the endpoint called by QRManagement.jsx:
-        /api/qr/download/{restaurantId}/{qr.qr_token}
-    Generates the QR on-the-fly — no Supabase Storage dependency.
-    """
-    try:
-        print(f"[download_qr] restaurant_id={restaurant_id} token={token}")
-        qr_bytes = generate_qr_png(restaurant_id, token)
-        filename = f"reviewflow_qr_{token}.png"
-        return Response(
-            content=qr_bytes,
-            media_type="image/png",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        )
-    except Exception as e:
-        print(f"[download_qr_with_token] Error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
-        )
+# Keep the old token-based preview route as an alias so existing cached
+# image src URLs in the browser don't immediately 404.
+@router.get("/preview/{restaurant_id}/{token}")
+async def preview_qr_with_token(restaurant_id: str, token: str):
+    """Legacy route — token param is ignored; delegates to preview_qr."""
+    return await preview_qr(restaurant_id)
 
 
 @router.get("/download/{restaurant_id}")
 async def download_qr(restaurant_id: str):
     """
-    Downloads the QR code PNG image directly (legacy — no token).
-    Falls back to generating from Supabase Storage if available.
+    Download the QR code PNG.
+    QR encodes restaurant.google_review_link.
+    Filename: {restaurant-name}-qr.png
     """
     try:
-        file_path = f"qr_{restaurant_id}.png"
-        public_url = supabase_client.storage.from_("qr-codes").get_public_url(file_path)
-        
-        # Download from public URL to serve as attachment
-        async with httpx.AsyncClient() as client:
-            response = await client.get(public_url)
-            if response.status_code != 200:
-                # Regenerate if file missing in storage
-                rest_res = supabase_client.table("restaurants").select("*").eq("id", restaurant_id).execute()
-                if not rest_res.data:
-                    raise HTTPException(status_code=404, detail="Restaurant not found")
-                restaurant = rest_res.data[0]
-                qr_bytes = generate_qr_png(restaurant_id, restaurant["restaurant_name"])
-                
-                # Re-upload
-                supabase_client.storage.from_("qr-codes").upload(
-                    path=file_path,
-                    file=qr_bytes,
-                    file_options={"content-type": "image/png"}
-                )
-                png_bytes = qr_bytes
-            else:
-                png_bytes = response.content
+        restaurant         = _get_restaurant(restaurant_id)
+        restaurant_name    = restaurant["restaurant_name"]
+        google_review_link = restaurant.get("google_review_link", "")
 
-        filename = f"reviewflow_qr_{restaurant_id}.png"
+        if not google_review_link:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="google_review_link not set. Add it in Settings before downloading.",
+            )
+
+        print(f"[download_qr] restaurant_id={restaurant_id} url={google_review_link}")
+        qr_bytes = generate_qr_png(qr_url=google_review_link, restaurant_name=restaurant_name)
+
+        safe_name = re.sub(r"[^a-z0-9\-]", "", restaurant_name.lower().replace(" ", "-"))
+        filename  = f"{safe_name or 'restaurant'}-qr.png"
+
         return Response(
-            content=png_bytes,
+            content=qr_bytes,
             media_type="image/png",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-cache",
+            },
         )
-
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[download_qr] Error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Legacy token-based download — delegates to the clean route.
+@router.get("/download/{restaurant_id}/{token}")
+async def download_qr_with_token(restaurant_id: str, token: str):
+    """Legacy route — token param is ignored; delegates to download_qr."""
+    return await download_qr(restaurant_id)
 
 
 @router.delete("/{restaurant_id}")
 async def delete_qr(restaurant_id: str):
-    """
-    Deletes the QR Code record for a restaurant.
-    """
+    """Delete the QR code record and stored image for a restaurant."""
     try:
-        # Delete from table
         supabase_client.table("qr_codes").delete().eq("restaurant_id", restaurant_id).execute()
-        
-        # Delete from storage
-        file_path = f"qr_{restaurant_id}.png"
         try:
-            supabase_client.storage.from_("qr-codes").remove([file_path])
+            supabase_client.storage.from_("qr-codes").remove([f"qr_{restaurant_id}.png"])
         except Exception:
             pass
-
-        return JSONResponse({
-            "success": True,
-            "message": "QR Code deleted successfully."
-        })
-
+        return JSONResponse({"success": True, "message": "QR Code deleted."})
     except Exception as e:
         print(f"[delete_qr] Error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/scan/{restaurant_id}")
 async def increment_scans(restaurant_id: str):
-    """
-    Increments the total scans for a given restaurant's QR code.
-    """
+    """Increment the total scan counter for a restaurant's QR code."""
     try:
-        # Fetch current scans
         qr_check = supabase_client.table("qr_codes").select("*").eq("restaurant_id", restaurant_id).execute()
         if not qr_check.data:
-            # Create a record if missing
             supabase_client.table("qr_codes").insert({
                 "restaurant_id": restaurant_id,
-                "qr_token": restaurant_id,
-                "qr_image_url": "",
-                "total_scans": 1
+                "qr_token":      restaurant_id,
+                "qr_image_url":  "",
+                "total_scans":   1,
             }).execute()
             current_scans = 1
         else:
-            current_scans = qr_check.data[0].get("total_scans" ,0) or 0
-            new_scans = current_scans + 1
+            current_scans = (qr_check.data[0].get("total_scans") or 0) + 1
             supabase_client.table("qr_codes").update({
-                "total_scans": new_scans
+                "total_scans": current_scans,
             }).eq("restaurant_id", restaurant_id).execute()
-            current_scans = new_scans
+
+        # Log activity_logs
+        try:
+            supabase_client.table("activity_logs").insert({
+                "restaurant_id": restaurant_id,
+                "activity_type": "qr_scanned",
+                "customer_name": "Anonymous",
+                "review_text": "",
+                "feedback_text": "",
+                "metadata": {}
+            }).execute()
+            print(f"[increment_scans] Logged qr_scanned activity for {restaurant_id}")
+        except Exception as log_err:
+            print(f"[increment_scans] Failed to insert activity_log: {log_err}")
 
         return JSONResponse({
-            "success": True,
-            "message": "Scans incremented successfully.",
-            "total_scans": current_scans
+            "success":      True,
+            "message":      "Scans incremented.",
+            "total_scans":  current_scans,
         })
-
     except Exception as e:
         print(f"[increment_scans] Error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
-
+        raise HTTPException(status_code=500, detail=str(e))

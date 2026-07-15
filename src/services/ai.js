@@ -5,6 +5,7 @@
  * Falls back to mock generation if the backend is unavailable.
  */
 
+// VITE_ prefix = exposed via import.meta.env (Vite native pattern)
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
 /**
@@ -15,7 +16,7 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
  * @param {Object} selectedTags - { food: string[], service: string[], ambience: string[] }
  * @returns {Promise<string[]>} List of 3 suggested review texts
  */
-export async function generateMockReviewSuggestions(ratings, selectedTags) {
+export async function generateMockReviewSuggestions(ratings, selectedTags, restaurantId) {
   const foodRating = ratings.food || 5;
   const serviceRating = ratings.service || 5;
   const ambienceRating = ratings.ambience || 5;
@@ -29,6 +30,7 @@ export async function generateMockReviewSuggestions(ratings, selectedTags) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        restaurant_id: restaurantId || null,
         food_rating: foodRating,
         service_rating: serviceRating,
         ambience_rating: ambienceRating,
@@ -63,23 +65,31 @@ export async function generateMockReviewSuggestions(ratings, selectedTags) {
  * @param {string} params.tableNumber
  * @param {string[]} params.feedbackCategories
  * @param {string} params.feedbackMessage
+ * @param {string} params.ratingSummary - e.g. "Food: 2/5, Service: 3/5, Ambience: 2/5"
  * @returns {Promise<boolean>} true if submitted successfully
  */
-export async function submitFeedbackToBackend({ restaurantId, tableNumber, feedbackCategories, feedbackMessage }) {
+export async function submitFeedbackToBackend({ restaurantId, tableNumber, feedbackCategories, feedbackMessage, ratingSummary }) {
   try {
     const response = await fetch(`${BACKEND_URL}/api/feedback/submit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         restaurant_id: restaurantId || 'unknown',
-        table_number: tableNumber || 'Unknown Table',
+        customer_name: 'Anonymous',
+        customer_email: 'anonymous@example.com',
         feedback_categories: feedbackCategories || [],
         feedback_message: feedbackMessage || '',
+        rating_summary: ratingSummary || 'N/A',
       }),
       signal: AbortSignal.timeout(10000),
     });
 
-    return response.ok;
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      console.warn('[ai.js] Feedback submission failed:', response.status, errData);
+      return false;
+    }
+    return true;
   } catch (err) {
     console.warn('[ai.js] Feedback submission to backend failed:', err.message);
     return false;
@@ -88,13 +98,14 @@ export async function submitFeedbackToBackend({ restaurantId, tableNumber, feedb
 
 /**
  * Predict whether an experience is positive or negative/neutral.
- * Emulates a local BERT sentiment classifier.
+ * Uses the configurable min_review_threshold from restaurant settings.
  *
  * @param {Object} ratings - { food: number, service: number, ambience: number }
  * @param {Object} selectedTags - All selected tags
+ * @param {number} [threshold=3.5] - Average rating threshold below which = negative routing
  * @returns {Object} { sentiment: 'POSITIVE' | 'NEGATIVE', score: number, requiresPrivateFeedback: boolean }
  */
-export function classifySentiment(ratings, selectedTags) {
+export function classifySentiment(ratings, selectedTags, threshold = 3.5) {
   const food = ratings.food || 5;
   const service = ratings.service || 5;
   const ambience = ratings.ambience || 5;
@@ -107,22 +118,24 @@ export function classifySentiment(ratings, selectedTags) {
 
   const hasNegativeTags = allTags.some(tag => negativeTags.includes(tag));
 
-  // If average rating is 3.5 or less, or if they have negative tags, classify as NEGATIVE
-  const isNegative = averageRating <= 3.5 || hasNegativeTags || food <= 3 || service <= 3;
+  // If average rating is below threshold, or if they have negative tags, classify as NEGATIVE
+  // threshold defaults to 3.5 but is read from restaurant's min_review_threshold setting
+  const isNegative = averageRating < threshold || hasNegativeTags || food <= 2 || service <= 2;
 
   return {
     sentiment: isNegative ? 'NEGATIVE' : 'POSITIVE',
     score: isNegative
       ? Math.max(0.1, 1 - (averageRating / 5))
       : Math.min(0.99, averageRating / 5),
-    requiresPrivateFeedback: isNegative
+    requiresPrivateFeedback: isNegative,
+    averageRating,
+    threshold,
   };
 }
 
 // ─── Local fallback mock reviews ────────────────────────────────────────────
 
 function _mockReviews(foodRating, serviceRating, ambienceRating, fTags, sTags, aTags) {
-  // Simulate slight delay
   const foodDesc = fTags.length > 0
     ? `The food was exceptionally ${fTags.join(', ').toLowerCase()}`
     : foodRating >= 4 ? 'The dishes were delicious and flavorful' : 'The food was standard';

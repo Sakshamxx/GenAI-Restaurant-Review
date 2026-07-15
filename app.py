@@ -17,6 +17,7 @@ from routes.auth import router as auth_router
 from routes.reviews import router as reviews_router
 from routes.qr import router as qr_router
 from routes.feedback import router as feedback_router
+from routes.activity import router as activity_router
 
 # Load environment variables from .env file
 load_dotenv()
@@ -51,6 +52,7 @@ app.include_router(auth_router)
 app.include_router(reviews_router)
 app.include_router(qr_router)
 app.include_router(feedback_router)
+app.include_router(activity_router)
 
 
 @app.get("/")
@@ -67,3 +69,30 @@ async def health_check():
 async def health():
     """Alias health check."""
     return {"status": "ok"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    HOST = "0.0.0.0"
+    PORT = 8000
+
+    banner = f"""
+╔══════════════════════════════════════════════════════╗
+║          ReviewFlow AI — Backend Starting            ║
+╠══════════════════════════════════════════════════════╣
+║  Backend :  http://localhost:{PORT}                    ║
+║  Swagger :  http://localhost:{PORT}/docs               ║
+║  ReDoc   :  http://localhost:{PORT}/redoc              ║
+║  Health  :  http://localhost:{PORT}/health             ║
+╚══════════════════════════════════════════════════════╝
+"""
+    print(banner)
+
+    uvicorn.run(
+        "app:app",
+        host=HOST,
+        port=PORT,
+        reload=True,
+        log_level="info",
+    )

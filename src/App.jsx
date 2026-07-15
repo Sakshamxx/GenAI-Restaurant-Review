@@ -60,10 +60,10 @@ function DemoToolbar() {
             <span className="text-xs text-slate-400 font-medium">Customer Experience Flow</span>
             <div className="grid grid-cols-2 gap-1.5">
               <Link
-                to="/"
+                to="/qr"
                 onClick={() => setCollapsed(true)}
                 className={`text-center py-1.5 px-2 rounded-lg text-xs font-medium transition-all ${
-                  location.pathname === '/' || location.pathname === '/qr'
+                  location.pathname === '/qr' || location.pathname.startsWith('/review')
                     ? 'bg-brand-500 text-white font-semibold'
                     : 'bg-white/5 hover:bg-white/10 text-slate-300'
                 }`}
@@ -183,7 +183,9 @@ export default function App() {
           <Route path="/review/:restaurantId" element={<QRScan />} />
           <Route path="/qr" element={<QRScan />} />
           <Route path="/suggestions" element={<AISuggestions />} />
+          <Route path="/customer/AISuggestions" element={<AISuggestions />} />
           <Route path="/feedback" element={<FeedbackForm />} />
+          <Route path="/customer/FeedbackForm" element={<FeedbackForm />} />
           <Route path="/success" element={<GoogleSuccess />} />
 
           {/* Owner Dashboard routes */}

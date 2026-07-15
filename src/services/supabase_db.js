@@ -7,6 +7,8 @@
  */
 import { supabase } from '../lib/supabase.js'
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+
 // ─── Auth ────────────────────────────────────────────────────────────────────
 
 export async function signIn(email, password) {
@@ -157,14 +159,24 @@ export async function upsertRestaurant(fields) {
     ...dbFields,
   }
 
+  // Remove settings columns that do not exist in database schema to avoid insert errors
+  delete payload.min_review_threshold;
+  delete payload.ai_writing_style;
+  delete payload.notifications_enabled;
+
   console.log('[supabase_db] upsertRestaurant payload:', payload)
   const existing = await getMyRestaurant()
 
   if (existing) {
-    console.log('[supabase_db] upsertRestaurant: updating existing id', existing.id, 'with', dbFields)
+    const updatePayload = { ...dbFields };
+    delete updatePayload.min_review_threshold;
+    delete updatePayload.ai_writing_style;
+    delete updatePayload.notifications_enabled;
+
+    console.log('[supabase_db] upsertRestaurant: updating existing id', existing.id, 'with', updatePayload)
     const { data, error } = await supabase
       .from('restaurants')
-      .update(dbFields)
+      .update(updatePayload)
       .eq('id', existing.id)
       .select()
       .single()
@@ -221,27 +233,33 @@ export async function getReviews(restaurantId) {
  */
 export async function addReview({ restaurantId, overallRating, foodRating, serviceRating,
   ambienceRating, reviewText, sentiment, sentimentScore, redirectedToGoogle }) {
-  const { data, error } = await supabase
-    .from('reviews')
-    .insert({
-      restaurant_id: restaurantId,
-      overall_rating: overallRating,
-      food_rating: foodRating,
-      service_rating: serviceRating,
-      ambience_rating: ambienceRating,
-      review_text: reviewText,
-      sentiment: sentiment || 'POSITIVE',
-      sentiment_score: sentimentScore || 1.0,
-      redirected_to_google: redirectedToGoogle || true,
-    })
-    .select()
-    .single()
-
-  if (error) {
-    console.error('[supabase_db] addReview error:', error.message)
-    return null
+  console.log('[supabase_db] addReview calling backend API...', { restaurantId, overallRating });
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/reviews/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        restaurant_id: restaurantId,
+        overall_rating: overallRating,
+        food_rating: foodRating,
+        service_rating: serviceRating,
+        ambience_rating: ambienceRating,
+        review_text: reviewText,
+        sentiment: sentiment || 'POSITIVE',
+        sentiment_score: sentimentScore || 1.0,
+        redirected_to_google: redirectedToGoogle !== false
+      })
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error ${response.status}`);
+    }
+    const data = await response.json();
+    console.log('[supabase_db] addReview API response:', data);
+    return data.review || null;
+  } catch (err) {
+    console.error('[supabase_db] addReview API failed:', err);
+    return null;
   }
-  return data
 }
 
 // ─── Feedback ─────────────────────────────────────────────────────────────────
@@ -270,26 +288,31 @@ export async function getFeedback(restaurantId) {
  * Insert a feedback/complaint record.
  */
 export async function addFeedback({ restaurantId, customerName, customerEmail,
-  category, severity, feedbackText }) {
-  const { data, error } = await supabase
-    .from('feedback')
-    .insert({
-      restaurant_id: restaurantId,
-      customer_name: customerName || null,
-      customer_email: customerEmail || null,
-      category: category || 'Other',
-      severity: severity || 'medium',
-      feedback_text: feedbackText,
-      resolved: false,
-    })
-    .select()
-    .single()
-
-  if (error) {
-    console.error('[supabase_db] addFeedback error:', error.message)
-    return null
+  category, severity, feedbackText, feedbackCategories, ratingSummary }) {
+  console.log('[supabase_db] addFeedback calling backend API...', { restaurantId, category });
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/feedback/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        restaurant_id: restaurantId,
+        customer_name: customerName || 'Anonymous',
+        customer_email: customerEmail || 'anonymous@example.com',
+        feedback_message: feedbackText,
+        feedback_categories: feedbackCategories || (category ? [category] : []),
+        rating_summary: ratingSummary || 'N/A'
+      })
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error ${response.status}`);
+    }
+    const data = await response.json();
+    console.log('[supabase_db] addFeedback API response:', data);
+    return data;
+  } catch (err) {
+    console.error('[supabase_db] addFeedback API failed:', err);
+    return null;
   }
-  return data
 }
 
 /**
@@ -392,36 +415,72 @@ export async function incrementQRScan(qrToken) {
 // ─── Stats (for Overview / Analytics) ────────────────────────────────────────
 
 /**
- * Get aggregate stats for a restaurant from Supabase.
+ * Get aggregate stats for a restaurant from Supabase activity_logs.
  */
 export async function getRestaurantStats(restaurantId) {
-  if (!restaurantId) return { totalReviews: 0, totalFeedback: 0, avgRating: 0, totalScans: 0 }
+  if (!restaurantId) return { totalReviews: 0, totalFeedback: 0, avgRating: 0, totalScans: 0, redirects: 0, redirectRate: 0 }
+  console.log('[supabase_db] getRestaurantStats calling backend API...', restaurantId);
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/activity/stats?restaurant_id=${restaurantId}`);
+    if (!response.ok) {
+      throw new Error(`HTTP error ${response.status}`);
+    }
+    const data = await response.json();
+    console.log('[supabase_db] getRestaurantStats API response:', data);
+    return data;
+  } catch (err) {
+    console.error('[supabase_db] getRestaurantStats API failed:', err);
+    return { totalReviews: 0, totalFeedback: 0, avgRating: 0, totalScans: 0, redirects: 0, redirectRate: 0 };
+  }
+}
 
-  const [reviewsResp, feedbackResp, qrResp] = await Promise.all([
-    supabase.from('reviews').select('overall_rating, redirected_to_google', { count: 'exact' })
-      .eq('restaurant_id', restaurantId),
-    supabase.from('feedback').select('id', { count: 'exact' })
-      .eq('restaurant_id', restaurantId),
-    supabase.from('qr_codes').select('total_scans')
-      .eq('restaurant_id', restaurantId),
-  ])
+/**
+ * Log customer activity via the backend API.
+ */
+export async function logActivity({ restaurantId, activityType, customerName, rating, reviewText, feedbackText, metadata }) {
+  console.log('[supabase_db] logActivity calling backend API...', { restaurantId, activityType });
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/activity/log`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        restaurant_id: restaurantId,
+        activity_type: activityType,
+        customer_name: customerName || 'Anonymous',
+        rating: rating,
+        review_text: reviewText || '',
+        feedback_text: feedbackText || '',
+        metadata: metadata || {}
+      })
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error ${response.status}`);
+    }
+    const data = await response.json();
+    console.log('[supabase_db] logActivity API response:', data);
+    return data;
+  } catch (err) {
+    console.error('[supabase_db] logActivity API failed:', err);
+    return null;
+  }
+}
 
-  const reviews = reviewsResp.data || []
-  const totalReviews = reviewsResp.count || reviews.length
-  const totalFeedback = feedbackResp.count || 0
-  const totalScans = (qrResp.data || []).reduce((sum, qr) => sum + (qr.total_scans || 0), 0)
-  const redirects = reviews.filter(r => r.redirected_to_google).length
-
-  const avgRating = reviews.length > 0
-    ? (reviews.reduce((s, r) => s + (r.overall_rating || 0), 0) / reviews.length)
-    : 0
-
-  return {
-    totalReviews,
-    totalFeedback,
-    avgRating: parseFloat(avgRating.toFixed(1)),
-    totalScans,
-    redirects,
-    redirectRate: totalScans > 0 ? Math.round((redirects / totalScans) * 100) : 0,
+/**
+ * Get all activity logs for a restaurant.
+ */
+export async function getActivityLogs(restaurantId, limit = 100) {
+  if (!restaurantId) return [];
+  console.log('[supabase_db] getActivityLogs calling backend API...', restaurantId);
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/activity/list?restaurant_id=${restaurantId}&limit=${limit}`);
+    if (!response.ok) {
+      throw new Error(`HTTP error ${response.status}`);
+    }
+    const data = await response.json();
+    console.log('[supabase_db] getActivityLogs API response:', data);
+    return data;
+  } catch (err) {
+    console.error('[supabase_db] getActivityLogs API failed:', err);
+    return [];
   }
 }

@@ -104,6 +104,57 @@ async def submit_feedback(request: FeedbackSubmitRequest):
                 detail="Failed to record private feedback.",
             )
 
+        # Log activities to activity_logs table
+        try:
+            # Parse ratings if possible
+            numeric_rating = None
+            try:
+                if "Food:" in request.rating_summary:
+                    parts = request.rating_summary.split(",")
+                    ratings_list = []
+                    for part in parts:
+                        val = int(part.split(":")[1].split("/")[0].strip())
+                        ratings_list.append(val)
+                    if ratings_list:
+                        numeric_rating = round(sum(ratings_list) / len(ratings_list), 1)
+            except Exception:
+                pass
+
+            # Log private_feedback
+            supabase_client.table("activity_logs").insert({
+                "restaurant_id": request.restaurant_id,
+                "activity_type": "private_feedback",
+                "customer_name": request.customer_name or "Anonymous",
+                "rating": numeric_rating,
+                "review_text": "",
+                "feedback_text": request.feedback_message,
+                "metadata": {
+                    "customer_email": request.customer_email,
+                    "category": ml_category,
+                    "severity": ml_severity,
+                    "rating_summary": request.rating_summary
+                }
+            }).execute()
+
+            # Log complaint_submitted
+            supabase_client.table("activity_logs").insert({
+                "restaurant_id": request.restaurant_id,
+                "activity_type": "complaint_submitted",
+                "customer_name": request.customer_name or "Anonymous",
+                "rating": numeric_rating,
+                "review_text": "",
+                "feedback_text": request.feedback_message,
+                "metadata": {
+                    "customer_email": request.customer_email,
+                    "category": ml_category,
+                    "severity": ml_severity,
+                    "rating_summary": request.rating_summary
+                }
+            }).execute()
+            print(f"[submit_feedback] Logged private_feedback and complaint_submitted activities for {request.restaurant_id}")
+        except Exception as log_err:
+            print(f"[submit_feedback] Failed to insert activity_log: {log_err}")
+
         # ── 4. Email notification ─────────────────────────────────────────
         email_sent = send_feedback_notification(
             restaurant_name=restaurant_name,

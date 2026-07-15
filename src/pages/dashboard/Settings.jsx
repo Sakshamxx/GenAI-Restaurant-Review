@@ -34,18 +34,28 @@ export default function SettingsPage() {
       try {
         const restaurant = await getMyRestaurant();
         console.log('[Settings] restaurant:', restaurant);
+        
+        // Load custom local config overrides
+        const localConfig = JSON.parse(localStorage.getItem('reviewflow_local_config') || '{}');
+
         if (restaurant) {
+          const threshold = localConfig.min_review_threshold ?? restaurant.min_review_threshold ?? 4.0;
+          const writingStyle = localConfig.ai_writing_style ?? restaurant.ai_writing_style ?? 'Enthusiastic & Warm';
+          const notify = localConfig.notifications_enabled ?? restaurant.notifications_enabled ?? true;
+
+          // Sync to sessionStorage for customer facing screens to read immediately
+          sessionStorage.setItem('reviewflow_min_review_threshold', threshold.toString());
+
           setFormData({
-            // Use canonical DB columns (restaurant object has both raw + aliases via spread)
             restaurant_name:      restaurant.restaurant_name || '',
             google_review_link:   restaurant.google_review_link || '',
             owner_email:          restaurant.owner_email || session?.user?.email || '',
             owner_name:           restaurant.owner_name || '',
             phone:                restaurant.phone || '',
             address:              restaurant.address || '',
-            min_review_threshold: restaurant.min_review_threshold ?? 4.0,
-            ai_writing_style:     restaurant.ai_writing_style || 'Enthusiastic & Warm',
-            notifications_enabled: restaurant.notifications_enabled ?? true,
+            min_review_threshold: threshold,
+            ai_writing_style:     writingStyle,
+            notifications_enabled: notify,
           });
         } else {
           setFormData(prev => ({
@@ -67,7 +77,7 @@ export default function SettingsPage() {
     setSaving(true);
     setError('');
     try {
-      // Pass canonical DB column names directly
+      // 1. Save standard columns to Supabase
       await upsertRestaurant({
         restaurant_name:    formData.restaurant_name,
         google_review_link: formData.google_review_link,
@@ -75,10 +85,17 @@ export default function SettingsPage() {
         owner_name:         formData.owner_name,
         phone:              formData.phone,
         address:            formData.address,
+      });
+
+      // 2. Save settings missing from database columns to localStorage as local overrides
+      const localOverrides = {
         min_review_threshold:  formData.min_review_threshold,
         ai_writing_style:      formData.ai_writing_style,
         notifications_enabled: formData.notifications_enabled,
-      });
+      };
+      localStorage.setItem('reviewflow_local_config', JSON.stringify(localOverrides));
+      sessionStorage.setItem('reviewflow_min_review_threshold', formData.min_review_threshold.toString());
+
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {

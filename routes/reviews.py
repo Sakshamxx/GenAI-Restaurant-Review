@@ -20,6 +20,7 @@ router = APIRouter(prefix="/api/reviews", tags=["reviews"])
 # ─── Request / Response Models ────────────────────────────────────────────────
 
 class ReviewGenerationRequest(BaseModel):
+    restaurant_id: str | None = None
     food_rating: int = Field(..., ge=1, le=5, description="Food rating 1-5")
     service_rating: int = Field(..., ge=1, le=5, description="Service rating 1-5")
     ambience_rating: int = Field(..., ge=1, le=5, description="Ambience rating 1-5")
@@ -37,7 +38,7 @@ class ReviewSubmitRequest(BaseModel):
     food_rating: int
     service_rating: int
     ambience_rating: int
-    overall_rating: int
+    overall_rating: float
     review_text: str
     sentiment: str | None = None          # Optional — will be overwritten by ML
     sentiment_score: float | None = None  # Optional — will be overwritten by ML
@@ -70,6 +71,29 @@ async def generate_review_suggestions(request: ReviewGenerationRequest):
             detail="Failed to generate reviews. Please try again."
         )
 
+    # Log to activity_logs
+    if request.restaurant_id:
+        try:
+            supabase_client.table("activity_logs").insert({
+                "restaurant_id": request.restaurant_id,
+                "activity_type": "review_generated",
+                "customer_name": "Anonymous",
+                "rating": round((request.food_rating + request.service_rating + request.ambience_rating) / 3, 1),
+                "review_text": "",
+                "feedback_text": "",
+                "metadata": {
+                    "food_rating": request.food_rating,
+                    "service_rating": request.service_rating,
+                    "ambience_rating": request.ambience_rating,
+                    "food_tags": food_tags,
+                    "service_tags": service_tags,
+                    "ambience_tags": ambience_tags
+                }
+            }).execute()
+            print(f"[generate_review_suggestions] Logged review_generated activity for {request.restaurant_id}")
+        except Exception as log_err:
+            print(f"[generate_review_suggestions] Failed to insert activity_log: {log_err}")
+
     return ReviewGenerationResponse(reviews=reviews)
 
 
@@ -96,7 +120,7 @@ async def submit_review(request: ReviewSubmitRequest):
         # ── Build record ──────────────────────────────────────────────────
         review_data = {
             "restaurant_id":     request.restaurant_id,
-            "overall_rating":    request.overall_rating,
+            "overall_rating":    round(request.overall_rating),  # DB column is integer
             "food_rating":       request.food_rating,
             "service_rating":    request.service_rating,
             "ambience_rating":   request.ambience_rating,
@@ -115,6 +139,27 @@ async def submit_review(request: ReviewSubmitRequest):
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to insert review into database.",
             )
+
+        # Log activity_logs
+        try:
+            supabase_client.table("activity_logs").insert({
+                "restaurant_id": request.restaurant_id,
+                "activity_type": "positive_review",
+                "customer_name": "Anonymous",
+                "rating": request.overall_rating,
+                "review_text": request.review_text,
+                "feedback_text": "",
+                "metadata": {
+                    "food_rating": request.food_rating,
+                    "service_rating": request.service_rating,
+                    "ambience_rating": request.ambience_rating,
+                    "sentiment": sentiment,
+                    "sentiment_score": sentiment_score
+                }
+            }).execute()
+            print(f"[submit_review] Logged positive_review activity for {request.restaurant_id}")
+        except Exception as log_err:
+            print(f"[submit_review] Failed to insert activity_log: {log_err}")
 
         return JSONResponse({
             "success": True,
