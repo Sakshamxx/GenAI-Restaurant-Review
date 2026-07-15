@@ -1,31 +1,25 @@
+# Python
+.venv/
+__pycache__/
+.env
+.env.*
+
 # Node
 node_modules/
 dist/
 
-# Python
-.venv/
-__pycache__
-*.pyc
+# Training Artifacts
+model/
+complaint_model/
+data/
 
-# Environment
-.env
-.env.local
-
-# Datasets
-# Datasets/
-# *.csv
-# *.xlsx
-
-# ML Models
-# Models/
-*.pth
-*.pt
-*.pkl
-*.joblib
-*.bin
+# Checkpoints
+checkpoint-*/
+*.safetensors
+optimizer.pt
 
 # Jupyter
 .ipynb_checkpoints/
 
-# Mac
+# OS
 .DS_Store
