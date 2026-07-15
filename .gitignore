@@ -1,1 +1,31 @@
-node_modules
+# Node
+node_modules/
+dist/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Environment
+.env
+.env.local
+
+# Datasets
+# Datasets/
+# *.csv
+# *.xlsx
+
+# ML Models
+# Models/
+*.pth
+*.pt
+*.pkl
+*.joblib
+*.bin
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Mac
+.DS_Store
