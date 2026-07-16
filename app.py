@@ -12,12 +12,24 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+import logging
+import time
+import uuid
+from fastapi import Request
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi import HTTPException
 
-from routes.auth import router as auth_router
-from routes.reviews import router as reviews_router
-from routes.qr import router as qr_router
-from routes.feedback import router as feedback_router
-from routes.activity import router as activity_router
+from backend.routes import (
+    auth_router,
+    reviews_router,
+    qr_router,
+    feedback_router,
+    activity_router,
+)
+from services.ml_pipeline import load_models, get_model_health
 
 # Load environment variables from .env file
 load_dotenv()
@@ -29,6 +41,32 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+# Basic structured logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s %(message)s')
+logger = logging.getLogger("reviewflow")
+
+
+@app.middleware("http")
+async def add_request_id_and_log(request: Request, call_next):
+    request_id = str(uuid.uuid4())
+    start = time.time()
+    response = await call_next(request)
+    duration = round((time.time() - start) * 1000, 2)
+    logger.info("%s %s %s %sms", request.method, request.url.path, request_id, duration)
+    response.headers["x-request-id"] = request_id
+    return response
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled exception: %s", exc)
+    return JSONResponse({"detail": "Internal server error"}, status_code=500)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse({"detail": exc.errors()}, status_code=422)
 
 # CORS — allow the React dev server and production frontend
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "https://reviewflow.ai")
@@ -71,6 +109,22 @@ async def health():
     return {"status": "ok"}
 
 
+@app.on_event("startup")
+async def _startup_models():
+    """Load ML models once at application startup."""
+    try:
+        load_models()
+    except Exception:
+        # load_models handles logging and exceptions; ensure startup does not crash
+        pass
+
+
+@app.get("/health/models")
+async def models_health():
+    """Return per-model health status."""
+    return get_model_health()
+
+
 if __name__ == "__main__":
     import uvicorn
 
@@ -96,3 +150,7 @@ if __name__ == "__main__":
         reload=True,
         log_level="info",
     )
+
+# If a built frontend exists in `dist/`, serve it as static files (single deployment)
+if Path(__file__).parent.joinpath("dist").exists():
+    app.mount("/", StaticFiles(directory=str(Path(__file__).parent.joinpath("dist")), html=True), name="frontend")

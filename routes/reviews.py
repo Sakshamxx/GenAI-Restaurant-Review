@@ -8,41 +8,25 @@ Handles:
 """
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
 from fastapi.responses import JSONResponse
-from services.gemini_service import generate_reviews
+import logging
+
+from services.review_generation import generate_suggestions
 from services.supabase_service import supabase_client
 from services.ml_service import analyze_text
+from services.decision_engine import decide
+from services.review_generation import generate_suggestions
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/reviews", tags=["reviews"])
 
-
-# ─── Request / Response Models ────────────────────────────────────────────────
-
-class ReviewGenerationRequest(BaseModel):
-    restaurant_id: str | None = None
-    food_rating: int = Field(..., ge=1, le=5, description="Food rating 1-5")
-    service_rating: int = Field(..., ge=1, le=5, description="Service rating 1-5")
-    ambience_rating: int = Field(..., ge=1, le=5, description="Ambience rating 1-5")
-    food_tags: list[str] = Field(default=[], description="Max 3 food tags")
-    service_tags: list[str] = Field(default=[], description="Max 3 service tags")
-    ambience_tags: list[str] = Field(default=[], description="Max 3 ambience tags")
-
-
-class ReviewGenerationResponse(BaseModel):
-    reviews: list[str]
-
-
-class ReviewSubmitRequest(BaseModel):
-    restaurant_id: str
-    food_rating: int
-    service_rating: int
-    ambience_rating: int
-    overall_rating: float
-    review_text: str
-    sentiment: str | None = None          # Optional — will be overwritten by ML
-    sentiment_score: float | None = None  # Optional — will be overwritten by ML
-    redirected_to_google: bool = True
+from schemas.review import (
+    ReviewGenerationRequest,
+    ReviewGenerationResponse,
+    ReviewSubmitRequest,
+    ReviewSubmitResponse,
+)
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
@@ -56,13 +40,13 @@ async def generate_review_suggestions(request: ReviewGenerationRequest):
     service_tags = request.service_tags[:3]
     ambience_tags = request.ambience_tags[:3]
 
-    reviews = await generate_reviews(
-        food_rating=request.food_rating,
-        service_rating=request.service_rating,
-        ambience_rating=request.ambience_rating,
-        food_tags=food_tags,
-        service_tags=service_tags,
-        ambience_tags=ambience_tags,
+    reviews = await generate_suggestions(
+        request.food_rating,
+        request.service_rating,
+        request.ambience_rating,
+        food_tags,
+        service_tags,
+        ambience_tags,
     )
 
     if not reviews or len(reviews) != 3:
@@ -107,72 +91,91 @@ async def submit_review(request: ReviewSubmitRequest):
       - sentiment_score (0-1 confidence)
     """
     try:
-        print(f"[submit_review] Received review for restaurant {request.restaurant_id}")
-        print(f"[submit_review] review_text: {request.review_text[:120]}...")
+        logger.info("[submit_review] Received review for restaurant %s", request.restaurant_id)
 
-        # ── ML Enrichment ─────────────────────────────────────────────────
+        # Run ML pipeline (sentiment, complaint, severity) — driver for routing
         ml_result = analyze_text(request.review_text)
-        print(f"[submit_review] ML result: {ml_result}")
+        logger.info("[submit_review] ML result: %s", ml_result)
 
-        sentiment       = ml_result.get("sentiment", request.sentiment or "Positive")
-        sentiment_score = ml_result.get("sentiment_score", request.sentiment_score or 0.9)
+        # Decision engine — uses ML predictions only
+        decision = decide(ml_result)
 
-        # ── Build record ──────────────────────────────────────────────────
+        # Build DB record (store ratings only for analytics; never use them for routing)
         review_data = {
-            "restaurant_id":     request.restaurant_id,
-            "overall_rating":    round(request.overall_rating),  # DB column is integer
-            "food_rating":       request.food_rating,
-            "service_rating":    request.service_rating,
-            "ambience_rating":   request.ambience_rating,
-            "review_text":       request.review_text,
-            "sentiment":         sentiment,
-            "sentiment_score":   sentiment_score,
-            "redirected_to_google": request.redirected_to_google,
+            "restaurant_id": request.restaurant_id,
+            "review_text": request.review_text,
+            "user_rating": round(request.overall_rating) if request.overall_rating is not None else None,
+            "food_rating": request.food_rating,
+            "service_rating": request.service_rating,
+            "ambience_rating": request.ambience_rating,
+            "sentiment_prediction": ml_result.get("sentiment"),
+            "sentiment_confidence": ml_result.get("sentiment_confidence"),
+            "complaint_category": ml_result.get("complaint_category"),
+            "complaint_confidence": ml_result.get("complaint_confidence"),
+            "severity_prediction": ml_result.get("severity"),
+            "severity_confidence": ml_result.get("severity_confidence"),
+            "keywords": ml_result.get("keywords", []),
+            "google_redirected": request.redirected_to_google,
+            "route_decision": decision.get("route_decision"),
+            "decision_reason": decision.get("reason"),
         }
 
-        print(f"[submit_review] Inserting review_data: {review_data}")
-        res = supabase_client.table("reviews").insert(review_data).execute()
-        print(f"[submit_review] Supabase response: {res.data}")
+        if supabase_client is None:
+            logger.warning("[submit_review] Supabase client not configured; skipping DB insert")
+            stored = None
+        else:
+            logger.debug("[submit_review] Inserting review_data to Supabase")
+            from services.supabase_service import safe_insert
 
-        if not res.data:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to insert review into database.",
-            )
+            stored = safe_insert("reviews", review_data)
 
-        # Log activity_logs
+        # Log activity
         try:
-            supabase_client.table("activity_logs").insert({
-                "restaurant_id": request.restaurant_id,
-                "activity_type": "positive_review",
-                "customer_name": "Anonymous",
-                "rating": request.overall_rating,
-                "review_text": request.review_text,
-                "feedback_text": "",
-                "metadata": {
-                    "food_rating": request.food_rating,
-                    "service_rating": request.service_rating,
-                    "ambience_rating": request.ambience_rating,
-                    "sentiment": sentiment,
-                    "sentiment_score": sentiment_score
-                }
-            }).execute()
-            print(f"[submit_review] Logged positive_review activity for {request.restaurant_id}")
-        except Exception as log_err:
-            print(f"[submit_review] Failed to insert activity_log: {log_err}")
+            if supabase_client is not None:
+                from services.supabase_service import safe_insert
+
+                safe_insert("activity_logs", {
+                    "restaurant_id": request.restaurant_id,
+                    "activity_type": "review_submitted",
+                    "customer_name": "Anonymous",
+                    "rating": request.overall_rating,
+                    "review_text": request.review_text,
+                    "feedback_text": "",
+                    "metadata": {
+                        "ml": ml_result,
+                        "decision": decision,
+                    }
+                })
+        except Exception:
+            logger.exception("[submit_review] Failed to log activity")
+
+        suggestions = []
+        if decision.get("route_decision") == "positive_flow":
+            # Generate 3 review suggestions (non-blocking best-effort)
+            try:
+                suggestions = await generate_suggestions(
+                    request.food_rating or 5,
+                    request.service_rating or 5,
+                    request.ambience_rating or 5,
+                    [], [], []
+                )
+            except Exception:
+                suggestions = []
 
         return JSONResponse({
             "success": True,
-            "message": "Review recorded successfully.",
-            "review": res.data[0],
+            "message": "Review processed.",
+            "review": stored,
             "ml": ml_result,
+            "decision": decision,
+            "suggestions": suggestions,
         })
 
     except Exception as e:
-        print(f"[submit_review] Error: {e}")
+        logger.exception("[submit_review] Error processing review")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Internal server error",
         )
 
 

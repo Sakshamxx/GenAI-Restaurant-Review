@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { MessageSquareOff, Check, Heart, ArrowRight } from 'lucide-react'
-import { addFeedback } from '../../services/supabase_db.js'
-import { submitFeedbackToBackend } from '../../services/ai.js'
+import { submitFeedback } from '../../services/api.js'
 
 const COMPLAINT_TAGS = [
   'Food Quality',
@@ -53,12 +52,13 @@ export default function FeedbackForm() {
     const restaurantId = sessionStorage.getItem('reviewflow_restaurant_id') || null;
     const tableId = sessionStorage.getItem('reviewflow_table_id') || 'Unknown Table';
 
-    // Save and notify via backend
+    // Submit feedback via backend API
     if (restaurantId) {
-      await addFeedback({
+      await submitFeedback({
         restaurantId,
+        customerName: 'Anonymous',
+        customerEmail: 'anonymous@example.com',
         category: selectedTags[0] || 'General',
-        severity: selectedTags.length > 2 ? 'high' : 'medium',
         feedbackText: comment,
         feedbackCategories: selectedTags,
         ratingSummary: `Food: ${ratings.food}/5, Service: ${ratings.service}/5, Ambience: ${ratings.ambience}/5`

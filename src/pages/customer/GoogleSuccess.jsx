@@ -2,15 +2,13 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { CheckCircle2, ExternalLink, ArrowRight } from 'lucide-react'
-import { db } from '../../services/db.js'
 
 export default function GoogleSuccess() {
   const navigate = useNavigate();
-  const settings = db.getSettings();
   const [countdown, setCountdown] = useState(4);
 
-  // Read Google URL and review text from sessionStorage (set by AISuggestions on submit)
-  const googleUrl = sessionStorage.getItem('reviewflow_google_url') || settings.googleReviewUrl;
+  const restaurantName = sessionStorage.getItem('reviewflow_restaurant_name') || 'Your Restaurant';
+  const googleUrl = sessionStorage.getItem('reviewflow_google_url') || '';
   const copiedReview = sessionStorage.getItem('reviewflow_copied_review') || '';
 
   useEffect(() => {

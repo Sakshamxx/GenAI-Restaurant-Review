@@ -19,7 +19,7 @@ export default function QRManagement() {
   const googleReviewLink = restaurant?.google_review_link || restaurant?.google_review_url || '';
 
   // The QR encodes the review FUNNEL URL — customer goes through rating, AI suggestions, then redirects to Google
-  const FRONTEND_BASE = window.location.origin;  // e.g. http://localhost:5173
+  const FRONTEND_BASE = import.meta.env.VITE_APP_URL || window.location.origin;
   const reviewFunnelUrl = restaurantId ? `${FRONTEND_BASE}/review/${restaurantId}` : '';
 
   // ─── State ─────────────────────────────────────────────────────────────────

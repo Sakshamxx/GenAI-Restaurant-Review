@@ -7,7 +7,11 @@
  */
 import { supabase } from '../lib/supabase.js'
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+const BACKEND_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL || '';
+
+if (!BACKEND_URL) {
+  console.warn('[supabase_db] VITE_API_URL or VITE_BACKEND_URL is not configured. Backend calls will use the current origin.');
+}
 
 // ─── Auth ────────────────────────────────────────────────────────────────────
 
@@ -18,58 +22,70 @@ export async function signIn(email, password) {
 }
 
 export async function signUpUser({ email, password, fullName, restaurantName }) {
-  // 1. Create Supabase Auth user
-  const { data, error } = await supabase.auth.signUp({
+  const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
     email,
     password,
     options: {
       data: {
-        full_name: fullName
-      }
-    }
+        full_name: fullName,
+        restaurant_name: restaurantName,
+      },
+    },
   })
-  if (error) throw error
 
-  // To be absolutely robust and create immediate active session, we perform a sign in.
-  const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password })
-  if (signInError) throw signInError
+  if (signUpError) {
+    console.error('[supabase_db] signUpUser error:', signUpError.message)
+    throw signUpError
+  }
 
-  const user = signInData.user
-  if (!user) throw new Error('No user returned after signing up and in')
+  const user = signUpData?.user
+  if (!user) {
+    throw new Error('Unable to create account. Please try again or contact support.')
+  }
 
-  // 2. Create the first restaurant record linked to the owner's ID
+  const restaurantPayload = {
+    owner_id: user.id,
+    restaurant_name: restaurantName || `${fullName}'s Restaurant`,
+    owner_name: fullName || '',
+    owner_email: email,
+    google_review_link: '',
+  }
+
   const { data: restData, error: restError } = await supabase
     .from('restaurants')
-    .insert({
-      owner_id: user.id,
-      restaurant_name: restaurantName,
-      owner_name: fullName,
-      owner_email: email,
-      google_review_link: ''
-    })
+    .insert(restaurantPayload)
     .select()
     .single()
 
   if (restError) {
-    console.error('Error inserting restaurant on signup:', restError.message)
+    console.error('[supabase_db] signUpUser insert restaurant error:', restError.message)
     throw restError
   }
 
-  // 3. Create a default tableside QR code placard for Table 1
   const defaultToken = `table-1-${Math.random().toString(36).substring(2, 8)}`
   const { error: qrError } = await supabase
     .from('qr_codes')
     .insert({
       restaurant_id: restData.id,
       qr_token: defaultToken,
-      total_scans: 0
+      total_scans: 0,
     })
 
   if (qrError) {
-    console.error('Error inserting default QR code on signup:', qrError.message)
+    console.error('[supabase_db] signUpUser default QR insert error:', qrError.message)
   }
 
-  return signInData
+  let result = signUpData
+  if (!signUpData.session) {
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password })
+    if (signInError) {
+      console.warn('[supabase_db] signUpUser sign-in after signup failed:', signInError.message)
+    } else {
+      result = signInData
+    }
+  }
+
+  return result
 }
 
 export async function signOut() {

@@ -219,13 +219,57 @@ def _load_models():
 
     # ── 2. Severity ───────────────────────────────────────────────────────
     try:
-        with open(SEVERITY_DIR / "tfidf_vectorizer.pkl", "rb") as f:
-            _severity_vect = pickle.load(f)
-        with open(SEVERITY_DIR / "logistic_regression.pkl", "rb") as f:
-            _severity_model = pickle.load(f)
-        with open(SEVERITY_DIR / "severity_label_encoder.pkl", "rb") as f:
-            _severity_le = pickle.load(f)
-        logger.info("[ml_service] Severity model loaded ✓")
+        # Prefer sklearn model + tfidf vectoriser if present
+        if (SEVERITY_DIR / "tfidf_vectorizer.pkl").exists() and (SEVERITY_DIR / "logistic_regression.pkl").exists():
+            with open(SEVERITY_DIR / "tfidf_vectorizer.pkl", "rb") as f:
+                _severity_vect = pickle.load(f)
+            with open(SEVERITY_DIR / "logistic_regression.pkl", "rb") as f:
+                _severity_model = pickle.load(f)
+            with open(SEVERITY_DIR / "severity_label_encoder.pkl", "rb") as f:
+                _severity_le = pickle.load(f)
+            logger.info("[ml_service] Severity sklearn model loaded ✓")
+        # Fallback: transformer-based severity model (requires vocab.pkl)
+        elif (SEVERITY_DIR / "severity_transformer_model.pth").exists() and (SEVERITY_DIR / "config.json").exists() and (SEVERITY_DIR / "vocab.pkl").exists():
+            try:
+                with open(SEVERITY_DIR / "config.json") as f:
+                    sev_cfg_raw = json.load(f)
+                # support both formats: either nested `model_config` or flat keys
+                if isinstance(sev_cfg_raw, dict) and "model_config" in sev_cfg_raw:
+                    sev_cfg = sev_cfg_raw["model_config"]
+                else:
+                    # Map common uppercase keys to expected names
+                    sev_cfg = {
+                        "vocab_size": sev_cfg_raw.get("vocab_size") or sev_cfg_raw.get("MAX_VOCAB_SIZE"),
+                        "num_classes": sev_cfg_raw.get("NUM_CLASSES") or len(sev_cfg_raw.get("id_to_label", {})),
+                        "embed_dim": sev_cfg_raw.get("EMBED_DIM") or sev_cfg_raw.get("embed_dim"),
+                        "num_heads": sev_cfg_raw.get("NUM_HEADS") or sev_cfg_raw.get("num_heads"),
+                        "num_layers": sev_cfg_raw.get("NUM_LAYERS") or sev_cfg_raw.get("num_layers"),
+                        "ff_dim": sev_cfg_raw.get("FF_DIM") or sev_cfg_raw.get("ff_dim"),
+                        "max_len": sev_cfg_raw.get("MAX_LEN") or sev_cfg_raw.get("max_len"),
+                        "dropout": sev_cfg_raw.get("DROPOUT") or sev_cfg_raw.get("dropout", 0.1),
+                    }
+                with open(SEVERITY_DIR / "vocab.pkl", "rb") as f:
+                    sev_vocab = pickle.load(f)
+
+                device = (
+                    torch.device("mps")  if torch.backends.mps.is_available() else
+                    torch.device("cuda") if torch.cuda.is_available() else
+                    torch.device("cpu")
+                )
+                sev_model = _ComplaintTransformer(**sev_cfg).to(device)
+                sev_model.load_state_dict(torch.load(SEVERITY_DIR / "severity_transformer_model.pth", map_location=device))
+                sev_model.eval()
+                _severity_model = sev_model
+                _severity_vocab = sev_vocab
+                # try load label encoder
+                if (SEVERITY_DIR / "severity_label_encoder.pkl").exists():
+                    with open(SEVERITY_DIR / "severity_label_encoder.pkl", "rb") as f:
+                        _severity_le = pickle.load(f)
+                logger.info(f"[ml_service] Severity Transformer loaded on {device} ✓")
+            except Exception as e:
+                logger.error(f"[ml_service] Failed to load Severity Transformer: {e}")
+        else:
+            logger.warning("[ml_service] No recognised severity model found (skipping)")
     except Exception as e:
         logger.error(f"[ml_service] Failed to load Severity model: {e}")
 
@@ -278,14 +322,18 @@ def analyze_text(text: str) -> dict:
                    | "General Dissatisfaction" | <other>,
     }
     """
+    # Do not auto-load models here; models should be loaded at application startup.
     if not _models_loaded:
-        _load_models()
+        logger.warning("[ml_service] Models not initialised; returning defaults")
 
     result = {
         "sentiment": "Positive",
-        "sentiment_score": 0.9,
+        "sentiment_confidence": 0.9,
         "severity": "Low",
-        "category": "General Dissatisfaction",
+        "severity_confidence": 0.9,
+        "complaint_category": "General Dissatisfaction",
+        "complaint_confidence": 0.9,
+        "keywords": [],
     }
 
     clean_text = text.strip() if text else ""
@@ -313,26 +361,59 @@ def analyze_text(text: str) -> dict:
             except Exception:
                 score = 0.85
 
-            result["sentiment"]       = label
-            result["sentiment_score"] = round(score, 4)
+            result["sentiment"]            = label
+            result["sentiment_confidence"] = round(score, 4)
         except Exception as e:
             logger.warning(f"[ml_service] Sentiment inference failed: {e}")
 
     # ── Severity ──────────────────────────────────────────────────────────
-    if _severity_vect and _severity_model and _severity_le:
-        try:
-            vec  = _severity_vect.transform([clean_text])
+    try:
+        # sklearn path
+        if _severity_vect is not None and hasattr(_severity_model, "predict") and not isinstance(_severity_model, nn.Module):
+            vec = _severity_vect.transform([clean_text])
             pred = int(_severity_model.predict(vec)[0])
-
             if isinstance(_severity_le, dict):
                 id_to_label = _severity_le.get("id_to_label", {})
                 label = id_to_label.get(pred, id_to_label.get(str(pred), "Low"))
             else:
                 label = str(_severity_le.inverse_transform([pred])[0])
-
+            # confidence
+            try:
+                proba = _severity_model.predict_proba(vec)[0]
+                score = float(max(proba))
+            except Exception:
+                score = 0.8
             result["severity"] = label
-        except Exception as e:
-            logger.warning(f"[ml_service] Severity inference failed: {e}")
+            result["severity_confidence"] = round(score, 4)
+        # torch transformer path
+        elif isinstance(_severity_model, nn.Module):
+            # requires severity vocab to exist
+            if hasattr(globals(), "_severity_vocab") and globals().get("_severity_vocab") is not None:
+                sev_vocab = globals().get("_severity_vocab")
+                prep = _preprocess(clean_text)
+                ids, mask = _text_to_ids(prep, sev_vocab, max_len=globals().get("_complaint_max_len", 128))
+                input_ids = torch.tensor([ids], dtype=torch.long).to(next(_severity_model.parameters()).device)
+                attention_mask = torch.tensor([mask], dtype=torch.long).to(next(_severity_model.parameters()).device)
+                with torch.no_grad():
+                    logits = _severity_model(input_ids, attention_mask)
+                    probs = F.softmax(logits, dim=1).cpu().numpy()[0]
+                    pred = int(probs.argmax())
+                    score = float(probs.max())
+                if hasattr(_severity_le, "inverse_transform"):
+                    label = str(_severity_le.inverse_transform([pred])[0])
+                elif isinstance(_severity_le, dict):
+                    id_to_label = _severity_le.get("id_to_label", {})
+                    label = id_to_label.get(pred, id_to_label.get(str(pred), "Low"))
+                else:
+                    label = "Low"
+                result["severity"] = label
+                result["severity_confidence"] = round(score, 4)
+            else:
+                logger.warning("[ml_service] Severity transformer present but vocab missing; skipping severity inference")
+        else:
+            logger.debug("[ml_service] No severity model available")
+    except Exception as e:
+        logger.warning(f"[ml_service] Severity inference failed: {e}")
 
     # ── Complaint Category ────────────────────────────────────────────────
     if _complaint_model and _complaint_vocab and _complaint_le:
@@ -350,7 +431,9 @@ def analyze_text(text: str) -> dict:
 
             with torch.no_grad():
                 logits     = _complaint_model(input_ids, attention_mask)
-                pred_class = int(torch.argmax(logits, dim=1).item())
+                probs      = F.softmax(logits, dim=1).cpu().numpy()[0]
+                pred_class = int(probs.argmax())
+                conf       = float(probs.max())
 
             # label_encoder is a sklearn LabelEncoder
             if hasattr(_complaint_le, "inverse_transform"):
@@ -361,13 +444,44 @@ def analyze_text(text: str) -> dict:
             else:
                 label = "General Dissatisfaction"
 
-            result["category"] = label
+            result["complaint_category"] = label
+            result["complaint_confidence"] = round(conf, 4)
         except Exception as e:
             logger.warning(f"[ml_service] Complaint inference failed: {e}")
+
+    # ── Explainability: extract keywords (best-effort)
+    try:
+        kws = []
+        # prefer TF-IDF feature names if available
+        try:
+            if _sentiment_vect is not None and hasattr(_sentiment_vect, "get_feature_names_out"):
+                vec = _sentiment_vect.transform([clean_text])
+                arr = vec.toarray()[0]
+                if arr.sum() > 0:
+                    top_idx = arr.argsort()[::-1][:3]
+                    feat_names = _sentiment_vect.get_feature_names_out()
+                    kws = [feat_names[i] for i in top_idx if arr[i] > 0]
+        except Exception:
+            pass
+
+        if not kws:
+            # fallback: simple frequency-based keywords
+            tokens = re.findall(r"[a-z]{2,}", clean_text.lower())
+            stopwords = {"the","and","is","in","at","we","you","it","was","for","of","to","a"}
+            freqs = {}
+            for t in tokens:
+                if t in stopwords:
+                    continue
+                freqs[t] = freqs.get(t, 0) + 1
+            kws = [k for k, _ in sorted(freqs.items(), key=lambda x: x[1], reverse=True)][:3]
+
+        result["keywords"] = kws
+    except Exception as e:
+        logger.debug(f"[ml_service] Keyword extraction failed: {e}")
 
     logger.debug(f"[ml_service] analyze_text result: {result}")
     return result
 
 
-# Load models eagerly when this module is imported
-_load_models()
+# NOTE: models are no longer loaded on import. Use `services.ml_pipeline.load_models()`
+# to initialise models at application startup (FastAPI startup event).

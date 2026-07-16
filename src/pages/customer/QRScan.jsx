@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Star, Utensils, HeartHandshake, Home, Check, Sparkles, Lock } from 'lucide-react'
 import { supabase } from '../../lib/supabase.js'
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+const BACKEND_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL || '';
 
 const FOOD_TAGS = {
   positive: ['Delicious', 'Fresh', 'Authentic', 'Value for Money', 'Flavorful'],

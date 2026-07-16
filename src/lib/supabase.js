@@ -4,14 +4,12 @@
  */
 import { createClient } from '@supabase/supabase-js'
 
-// Vite exposes these via vite.config.js define.process.env
-const supabaseUrl = process.env.SUPABASE_URL
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.SUPABASE_ANON_KEY
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error(
-    '[supabase] Missing SUPABASE_URL or SUPABASE_ANON_KEY. ' +
-    'Check your .env file and vite.config.js define block.'
+    '[supabase] Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY. Check your .env file.'
   )
 }
 

@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles, ArrowRight, Edit3, CornerDownRight, Check } from 'lucide-react'
-import { generateMockReviewSuggestions, classifySentiment } from '../../services/ai.js'
-import { addReview, addFeedback, logActivity } from '../../services/supabase_db.js'
+import { generateSuggestions } from '../../services/api.js'
+import { addFeedback, logActivity } from '../../services/supabase_db.js'
 
 export default function AISuggestions() {
   const navigate = useNavigate();
@@ -18,7 +18,7 @@ export default function AISuggestions() {
   const [isEditing, setIsEditing] = useState(false);
   const [toast, setToast] = useState(null); // { message, type }
 
-  // Sentiment prediction based on ratings and tags
+  // Sentiment prediction will be provided by backend after submission
   const [predictedSentiment, setPredictedSentiment] = useState(null);
 
   // Sentinel to track if a blank-page error occurred
@@ -49,33 +49,27 @@ export default function AISuggestions() {
     );
     console.log('[AISuggestions] Threshold:', thresholdVal);
 
-    const classification = classifySentiment(parsedRatings, parsedTags, thresholdVal);
-    console.log('[AISuggestions] Sentiment:', classification);
-    setPredictedSentiment(classification);
+    // Remove client-side rating-based classification; backend will determine routing
+    setPredictedSentiment(null);
 
     const restaurantId = sessionStorage.getItem('reviewflow_restaurant_id') || null;
-    console.log('[AISuggestions] Calling generateMockReviewSuggestions for restaurant:', restaurantId);
-    generateMockReviewSuggestions(parsedRatings, parsedTags, restaurantId)
-      .then(result => {
-        console.log('[AISuggestions] AI result:', result);
-        // Validate result is a non-empty array of strings
+    generateSuggestions({ restaurantId, reviewText: '', count: 3 })
+      .then(data => {
+        const result = data?.suggestions || data?.reviews || [];
         if (Array.isArray(result) && result.length > 0 && typeof result[0] === 'string') {
           setSuggestions(result);
           setEditableText(result[0]);
-        } else {
-          console.warn('[AISuggestions] Unexpected result format, using emergency fallback');
-          const fallback = _emergencyFallback(parsedRatings);
-          setSuggestions(fallback);
-          setEditableText(fallback[0]);
+          return;
         }
-      })
-      .catch(err => {
-        console.error('[AISuggestions] generateMockReviewSuggestions failed:', err);
-        // NEVER leave the page blank — generate reviews client-side synchronously
         const fallback = _emergencyFallback(parsedRatings);
         setSuggestions(fallback);
         setEditableText(fallback[0]);
-        setApiError('AI service unavailable. Using pre-generated suggestions.');
+      })
+      .catch(() => {
+        const fallback = _emergencyFallback(parsedRatings);
+        setSuggestions(fallback);
+        setEditableText(fallback[0]);
+        setApiError('AI service unavailable. Using fallback suggestions.');
       })
       .finally(() => {
         setLoading(false);
@@ -101,64 +95,49 @@ export default function AISuggestions() {
     console.log('Restaurant:', { id: restaurantId, name: restaurantName });
     console.log('Rating:', overallRating, 'Ratings:', ratings);
 
-    if (predictedSentiment && predictedSentiment.requiresPrivateFeedback) {
-      // Negative sentiment → persist to Supabase feedback + navigate to form
-      sessionStorage.setItem('reviewflow_draft_complaint', editableText);
-      if (restaurantId) {
-        await addFeedback({
-          restaurantId,
-          category: allTags[0] || 'General',
-          severity: 'medium',
-          feedbackText: editableText,
-        });
-      }
-      navigate('/feedback');
-    } else {
-      // Positive → persist review to Supabase
-      if (restaurantId) {
-        await addReview({
-          restaurantId,
-          overallRating,
-          foodRating: ratings.food,
-          serviceRating: ratings.service,
-          ambienceRating: ratings.ambience,
-          reviewText: editableText,
-          sentiment: predictedSentiment?.sentiment || 'POSITIVE',
-          sentimentScore: predictedSentiment?.score || 1.0,
-          redirectedToGoogle: true,
-        });
-      }
+    // Submit review to backend; backend ML pipeline and decision engine will return routing
+    if (restaurantId) {
+      const resp = await submitReview({
+        restaurantId,
+        overallRating,
+        foodRating: ratings.food,
+        serviceRating: ratings.service,
+        ambienceRating: ratings.ambience,
+        reviewText: editableText,
+        redirectedToGoogle: true,
+      });
 
-      // Read Google URL from session (set by QRScan from restaurant.google_review_link)
-      const googleUrl = sessionStorage.getItem('reviewflow_google_url') || '';
-      console.log('Redirect URL:', googleUrl);
-
-      sessionStorage.setItem('reviewflow_copied_review', editableText);
-
-      try {
-        await navigator.clipboard.writeText(editableText);
-        showToast('Review copied! Paste it into Google Reviews.', 'success');
-      } catch (err) {
-        showToast('Review ready! Proceeding to Google Reviews.', 'info');
-      }
-
-      // Open Google Reviews URL in the SAME tab after a short delay so toast is visible
-      setTimeout(async () => {
-        if (restaurantId) {
-          await logActivity({
-            restaurantId,
-            activityType: 'google_redirect',
-            customerName: 'Anonymous',
-            rating: overallRating,
-            reviewText: editableText
-          });
+      // resp includes { success, message, review, ml, decision, suggestions }
+      if (resp && resp.decision) {
+        const route = resp.decision.route_decision;
+        if (route === 'positive_flow') {
+          // copy and redirect to google
+          sessionStorage.setItem('reviewflow_copied_review', editableText);
+          try { await navigator.clipboard.writeText(editableText); } catch {}
+          const googleUrl = sessionStorage.getItem('reviewflow_google_url') || '';
+          setTimeout(async () => {
+            if (restaurantId) {
+              await logActivity({
+                restaurantId,
+                activityType: 'google_redirect',
+                customerName: 'Anonymous',
+                rating: overallRating,
+                reviewText: editableText
+              });
+            }
+            if (googleUrl) window.location.href = googleUrl;
+            else navigate('/success');
+          }, 1200);
+          return;
         }
-        if (googleUrl) {
-          window.location.href = googleUrl;
-        } else {
-          navigate('/success');
-        }
-      }, 1500);
+        // neutral_flow or negative_flow → open private feedback
+        sessionStorage.setItem('reviewflow_draft_complaint', editableText);
+        navigate('/feedback');
+        return;
+      }
+
+      // Fallback: navigate to success
+      navigate('/success');
     }
   };
 
@@ -172,15 +151,13 @@ export default function AISuggestions() {
     console.log('Redirect URL:', googleUrl);
 
     if (restaurantId) {
-      await addReview({
+      await submitReview({
         restaurantId,
         overallRating,
         foodRating: ratings.food,
         serviceRating: ratings.service,
         ambienceRating: ratings.ambience,
         reviewText: editableText,
-        sentiment: 'POSITIVE',
-        sentimentScore: 0.95,
         redirectedToGoogle: true,
       });
     }

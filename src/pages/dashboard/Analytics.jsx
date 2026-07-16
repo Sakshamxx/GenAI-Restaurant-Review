@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useOutletContext } from 'react-router-dom'
-import { BarChart3, Sparkles, Star, Loader2, TrendingUp } from 'lucide-react'
+import { BarChart3, Sparkles, Star, Loader2, TrendingUp, RefreshCw } from 'lucide-react'
 import { getRestaurantStats, getReviews, getFeedback } from '../../services/supabase_db.js'
+import { getAnalytics, getActivityLogs } from '../../services/api.js'
+import { Toast, apiCall } from '../../lib/errorHandler.js'
 import {
   BarChart,
   Bar,
@@ -14,7 +16,9 @@ import {
   ResponsiveContainer,
   PieChart,
   Pie,
-  Legend
+  Legend,
+  LineChart,
+  Line
 } from 'recharts'
 
 export default function Analytics() {
@@ -24,38 +28,56 @@ export default function Analytics() {
   const [stats, setStats] = useState({ redirects: 0, totalFeedback: 0, totalReviews: 0, avgRating: 0 });
   const [reviews, setReviews] = useState([]);
   const [feedback, setFeedback] = useState([]);
+  const [activities, setActivities] = useState([])
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [timeRange, setTimeRange] = useState('month')
 
-  useEffect(() => {
+  const loadAnalytics = async () => {
     if (!restaurantId) {
       setLoading(false);
       return;
     }
-    const load = async () => {
-      setLoading(true);
-      setError('');
-      try {
-        const [s, r, f] = await Promise.all([
-          getRestaurantStats(restaurantId),
-          getReviews(restaurantId),
-          getFeedback(restaurantId),
-        ]);
-        console.log('[Analytics] stats:', s);
-        console.log('[Analytics] reviews:', r);
-        console.log('[Analytics] feedback:', f);
-        setStats(s);
-        setReviews(r);
-        setFeedback(f);
-      } catch (err) {
-        console.error('[Analytics] load error:', err);
-        setError('Failed to load analytics data.');
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, [restaurantId]);
+    
+    await apiCall(
+      async () => {
+        setLoading(true);
+        setError('');
+        
+        try {
+          const [s, r, f] = await Promise.all([
+            getRestaurantStats(restaurantId),
+            getReviews(restaurantId),
+            getFeedback(restaurantId),
+          ]);
+          
+          // Also try to get activities from API
+          try {
+            const act = await getActivityLogs(restaurantId)
+            setActivities(act.slice(0, 10))
+          } catch (e) {
+            console.log('Activities not available from API')
+          }
+          
+          setStats(s);
+          setReviews(r);
+          setFeedback(f);
+          Toast.success('Analytics updated')
+        } catch (err) {
+          console.error('[Analytics] load error:', err);
+          setError('Failed to load analytics data. ' + (err.message || ''))
+          Toast.error('Failed to load analytics')
+        } finally {
+          setLoading(false);
+        }
+      },
+      { retries: 1 }
+    )
+  }
+
+  useEffect(() => {
+    loadAnalytics();
+  }, [restaurantId, timeRange]);
 
   // ── Chart 1: Sentiment Distribution (from ML-labelled reviews) ──────────────
   const sentimentData = (() => {
@@ -132,13 +154,42 @@ export default function Analytics() {
 
   const noData = !loading && reviews.length === 0 && feedback.length === 0;
 
-  return (
-    <div className="flex flex-col gap-8">
-      {/* Header */}
+  // ── Header with refresh button ──────────────────────────────────────────────
+  const headerSection = (
+    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
       <div>
         <h1 className="text-3xl font-display font-extrabold text-white tracking-tight">Business Intelligence</h1>
-        <p className="text-sm text-slate-400 mt-1">Deep analysis of customer sentiment distribution and operational bottlenecks.</p>
+        <p className="text-sm text-slate-400 mt-1">Deep analysis of customer sentiment and operational metrics.</p>
       </div>
+      <div className="flex gap-2">
+        {['week', 'month', 'all'].map(range => (
+          <button
+            key={range}
+            onClick={() => setTimeRange(range)}
+            className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
+              timeRange === range
+                ? 'bg-blue-500 text-white shadow-lg'
+                : 'bg-gray-700 text-gray-200 hover:bg-gray-600'
+            }`}
+          >
+            {range === 'week' ? 'Week' : range === 'month' ? 'Month' : 'All'}
+          </button>
+        ))}
+        <button
+          onClick={loadAnalytics}
+          disabled={loading}
+          className="px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white rounded-lg font-medium transition-all flex items-center gap-2"
+        >
+          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+          Refresh
+        </button>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="flex flex-col gap-8">
+      {headerSection}
 
       {error && (
         <div className="bg-red-500/10 border border-red-500/25 text-red-300 rounded-xl px-4 py-3 text-xs font-semibold">
