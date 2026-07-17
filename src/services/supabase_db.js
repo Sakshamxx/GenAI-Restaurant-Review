@@ -7,10 +7,10 @@
  */
 import { supabase } from '../lib/supabase.js'
 
-const BACKEND_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL || '';
+const BACKEND_URL = (import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL || '').trim();
 
 if (!BACKEND_URL) {
-  console.warn('[supabase_db] VITE_API_URL or VITE_BACKEND_URL is not configured. Backend calls will use the current origin.');
+  console.warn('[supabase_db] VITE_API_URL or VITE_BACKEND_URL is not configured.');
 }
 
 // ─── Auth ────────────────────────────────────────────────────────────────────

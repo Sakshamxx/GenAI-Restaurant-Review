@@ -69,17 +69,18 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return JSONResponse({"detail": exc.errors()}, status_code=422)
 
 # CORS — allow the React dev server and production frontend
-FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "https://reviewflow.ai")
+raw_frontend_origins = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
+frontend_origins = [origin.strip() for origin in raw_frontend_origins.split(",") if origin.strip()]
+frontend_origins.extend([
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://localhost:4173",
+])
+allow_origins = list(dict.fromkeys(frontend_origins))
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        FRONTEND_ORIGIN,
-        "http://localhost:5173",   # vite dev server (default)
-        "http://localhost:3000",   # common alternative dev port
-        "http://localhost:4173",   # vite preview
-        "https://reviewflow.ai",   # production
-    ],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
