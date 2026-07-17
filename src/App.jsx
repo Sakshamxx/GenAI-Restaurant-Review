@@ -4,6 +4,7 @@ import { Sparkles, LayoutDashboard, RotateCcw, Menu, X } from 'lucide-react'
 
 // Import Customer Pages
 import QRScan from './pages/customer/QRScan.jsx'
+import ReviewPage from './pages/customer/ReviewPage.jsx'
 import AISuggestions from './pages/customer/AISuggestions.jsx'
 import FeedbackForm from './pages/customer/FeedbackForm.jsx'
 import GoogleSuccess from './pages/customer/GoogleSuccess.jsx'
@@ -179,8 +180,8 @@ export default function App() {
           <Route path="/" element={<Navigate to="/login" replace />} />
 
           {/* Customer experience routes — accessible via QR scan URLs */}
-          <Route path="/review/:restaurantId/:tableId" element={<QRScan />} />
-          <Route path="/review/:restaurantId" element={<QRScan />} />
+          <Route path="/review/:restaurantId/:tableId" element={<ReviewPage />} />
+          <Route path="/review/:restaurantId" element={<ReviewPage />} />
           <Route path="/qr" element={<QRScan />} />
           <Route path="/suggestions" element={<AISuggestions />} />
           <Route path="/customer/AISuggestions" element={<AISuggestions />} />

@@ -31,8 +31,10 @@ from backend.routes import (
 )
 from services.ml_pipeline import load_models, get_model_health
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from repo env files so local dev and deployment share the same values.
+for env_file in [Path(__file__).resolve().parent / '.env', Path(__file__).resolve().parent / 'frontend.env']:
+    if env_file.exists():
+        load_dotenv(env_file, override=False)
 
 app = FastAPI(
     title="ReviewFlow AI Backend",

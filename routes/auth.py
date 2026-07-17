@@ -9,6 +9,14 @@ from pydantic import BaseModel, EmailStr
 from services.supabase_service import supabase_client
 from services.qr_service import generate_qr_png
 
+
+def _require_supabase_client():
+    if supabase_client is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Supabase is not configured for this deployment. Set real SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY values.",
+        )
+
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
@@ -49,6 +57,8 @@ async def signup(request: SignupRequest):
     3. Generates restaurant-wide QR code, uploads it to Supabase Storage, and saves it.
     """
     try:
+        _require_supabase_client()
+
         # 1. Create Supabase Auth User via Admin client
         user_response = supabase_client.auth.admin.create_user({
             "email": request.email,
@@ -122,6 +132,8 @@ async def signup(request: SignupRequest):
             restaurant_id=restaurant_id
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[signup] Error occurred: {e}")
         raise HTTPException(
@@ -137,6 +149,8 @@ async def login(request: LoginRequest):
     Authenticates user via Supabase Auth and returns active session token.
     """
     try:
+        _require_supabase_client()
+
         auth_response = supabase_client.auth.sign_in_with_password({
             "email": request.email,
             "password": request.password
@@ -154,6 +168,8 @@ async def login(request: LoginRequest):
             email=auth_response.user.email
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[login] Error occurred: {e}")
         return LoginResponse(

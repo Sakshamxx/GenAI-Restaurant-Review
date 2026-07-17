@@ -6,6 +6,7 @@ QR content is always restaurant.google_review_link — never a hardcoded localho
 """
 
 import re
+import uuid
 import httpx
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import Response, JSONResponse
@@ -27,6 +28,14 @@ def _get_restaurant(restaurant_id: str) -> dict:
     Fetch the full restaurant row from Supabase.
     Raises 404 if not found.
     """
+    try:
+        uuid.UUID(restaurant_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="restaurant_id must be a valid UUID") from exc
+
+    if supabase_client is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Supabase is not configured for this deployment.")
+
     res = supabase_client.table("restaurants").select("*").eq("id", restaurant_id).execute()
     if not res.data:
         raise HTTPException(
@@ -114,7 +123,9 @@ async def generate_qr(request: QRGenerateRequest):
                 detail="google_review_link is not set. Add it in Settings before generating a QR code.",
             )
 
-        print(f"[generate_qr] Generating QR for {restaurant_name} → {google_review_link}")
+        if not google_review_link.startswith(('http://', 'https://')):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="google_review_link must be a valid absolute URL")
+
         qr_bytes = generate_qr_png(qr_url=google_review_link, restaurant_name=restaurant_name)
 
         # Upload to Supabase Storage (overwrite existing)

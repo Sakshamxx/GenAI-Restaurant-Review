@@ -18,8 +18,12 @@ api_key = os.getenv("Gemini_API_Key")
 if api_key:
     api_key = api_key.strip('"').strip("'").strip("”").strip("“")
 
-# Configure Gemini client using the latest SDK
-client = genai.Client(api_key=api_key)
+client = None
+if api_key:
+    try:
+        client = genai.Client(api_key=api_key)
+    except Exception as exc:
+        print(f"[gemini_service] Gemini client initialization failed: {exc}")
 
 # Using the validated working model with active quota
 MODEL_NAME = "gemini-3.1-flash-lite"
@@ -101,6 +105,9 @@ async def generate_reviews(
             food_rating, service_rating, ambience_rating,
             food_tags, service_tags, ambience_tags
         )
+
+        if client is None:
+            raise RuntimeError("Gemini API key is not configured")
 
         # Run synchronous SDK call in an executor thread to not block FastAPI
         loop = asyncio.get_running_loop()

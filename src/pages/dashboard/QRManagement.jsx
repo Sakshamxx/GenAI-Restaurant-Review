@@ -18,8 +18,8 @@ export default function QRManagement() {
   const restaurantName  = restaurant?.restaurant_name || restaurant?.name || 'Restaurant';
   const googleReviewLink = restaurant?.google_review_link || restaurant?.google_review_url || '';
 
-  // The QR encodes the review FUNNEL URL — customer goes through rating, AI suggestions, then redirects to Google
-  const FRONTEND_BASE = import.meta.env.VITE_APP_URL || window.location.origin;
+  // The QR encodes the public review funnel URL. This must match the route registered in App.jsx.
+  const FRONTEND_BASE = (import.meta.env.VITE_APP_URL || import.meta.env.VITE_FRONTEND_URL || window.location.origin || '').replace(/\/$/, '');
   const reviewFunnelUrl = restaurantId ? `${FRONTEND_BASE}/review/${restaurantId}` : '';
 
   // ─── State ─────────────────────────────────────────────────────────────────
@@ -41,9 +41,7 @@ export default function QRManagement() {
       return;
     }
     setError('');
-    console.log('[QRManagement] Regenerating QR — Funnel URL:', reviewFunnelUrl);
     setQrKey(k => k + 1);   // bump key → React remounts QRCodeCanvas → fresh render
-    console.log('[QRManagement] QR Generated');
   };
 
   // ─── Download — canvas → PNG blob → anchor click ──────────────────────────
@@ -57,7 +55,6 @@ export default function QRManagement() {
     setDownloading(true);
 
     try {
-      console.log('[QRManagement] Downloading QR — Google URL:', googleReviewLink);
       const canvas = document.getElementById(QR_CANVAS_ID);
       if (!canvas) {
         throw new Error('QR canvas element not found. Try clicking Regenerate first.');
@@ -74,7 +71,6 @@ export default function QRManagement() {
       downloadLink.download = `${safeName || 'restaurant'}-qr.png`;
       downloadLink.click();
 
-      console.log('[QRManagement] QR PNG downloaded as:', downloadLink.download);
     } catch (err) {
       console.error('[QRManagement] download error:', err.message);
       setError(err.message);

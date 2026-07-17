@@ -16,9 +16,18 @@ if (!BACKEND_URL) {
 // ─── Auth ────────────────────────────────────────────────────────────────────
 
 export async function signIn(email, password) {
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-  if (error) throw error
-  return data
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) {
+      throw new Error(error.message || 'Unable to sign in. Check your Supabase credentials.')
+    }
+    return data
+  } catch (error) {
+    if (error?.message?.includes('Invalid API key')) {
+      throw new Error('Supabase authentication is misconfigured. Check your VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY values.')
+    }
+    throw error
+  }
 }
 
 export async function signUpUser({ email, password, fullName, restaurantName }) {
@@ -114,14 +123,12 @@ export async function getMyRestaurant() {
   const session = await getSession()
   if (!session) return null
 
-  console.log('[supabase_db] getMyRestaurant — user id:', session.user.id)
   const { data, error } = await supabase
     .from('restaurants')
     .select('*')
     .eq('owner_id', session.user.id)
     .maybeSingle()
 
-  console.log('[supabase_db] getMyRestaurant data:', data, 'error:', error?.message)
   if (error) {
     console.error('[supabase_db] getMyRestaurant error:', error.message)
     return null
@@ -180,7 +187,6 @@ export async function upsertRestaurant(fields) {
   delete payload.ai_writing_style;
   delete payload.notifications_enabled;
 
-  console.log('[supabase_db] upsertRestaurant payload:', payload)
   const existing = await getMyRestaurant()
 
   if (existing) {
@@ -189,14 +195,12 @@ export async function upsertRestaurant(fields) {
     delete updatePayload.ai_writing_style;
     delete updatePayload.notifications_enabled;
 
-    console.log('[supabase_db] upsertRestaurant: updating existing id', existing.id, 'with', updatePayload)
     const { data, error } = await supabase
       .from('restaurants')
       .update(updatePayload)
       .eq('id', existing.id)
       .select()
       .single()
-    console.log('[supabase_db] upsertRestaurant update data:', data, 'error:', error?.message)
     if (error) throw error
     return {
       ...data,
@@ -205,7 +209,6 @@ export async function upsertRestaurant(fields) {
       notification_email: data.owner_email,
     }
   } else {
-    console.log('[supabase_db] upsertRestaurant: inserting new record')
     const { data, error } = await supabase
       .from('restaurants')
       .insert(payload)

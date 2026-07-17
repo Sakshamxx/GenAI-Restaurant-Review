@@ -9,6 +9,19 @@ from supabase import create_client, Client
 
 load_dotenv()
 
+
+def _has_placeholder_value(value: str | None) -> bool:
+    if not value:
+        return True
+    normalized = value.lower()
+    return (
+        "replace-with-your" in normalized
+        or "your-project" in normalized
+        or "your-" in normalized
+        or "example" in normalized
+        or "changeme" in normalized
+    )
+
 supabase_url = os.getenv("SUPABASE_URL")
 if supabase_url:
     supabase_url = supabase_url.strip('"').strip("'").strip("”").strip("“")
@@ -17,8 +30,8 @@ supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 if supabase_key:
     supabase_key = supabase_key.strip('"').strip("'").strip("”").strip("“")
 
-if not supabase_url or not supabase_key:
-    print("[supabase_service] Warning: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing! Supabase client will not be created.")
+if not supabase_url or not supabase_key or _has_placeholder_value(supabase_url) or _has_placeholder_value(supabase_key):
+    print("[supabase_service] Warning: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing or still placeholder. Supabase client will not be created.")
     supabase_client = None
 else:
     # Service role client bypasses RLS for administrative backend operations
