@@ -4,12 +4,14 @@ from typing import List, Optional
 
 class ReviewGenerationRequest(BaseModel):
     restaurant_id: Optional[str] = None
-    food_rating: int = Field(..., ge=1, le=5)
-    service_rating: int = Field(..., ge=1, le=5)
-    ambience_rating: int = Field(..., ge=1, le=5)
-    food_tags: List[str] = []
-    service_tags: List[str] = []
-    ambience_tags: List[str] = []
+    review_text: Optional[str] = None
+    food_rating: Optional[int] = Field(default=5, ge=1, le=5)
+    service_rating: Optional[int] = Field(default=5, ge=1, le=5)
+    ambience_rating: Optional[int] = Field(default=5, ge=1, le=5)
+    food_tags: List[str] = Field(default_factory=list)
+    service_tags: List[str] = Field(default_factory=list)
+    ambience_tags: List[str] = Field(default_factory=list)
+    count: Optional[int] = Field(default=3, ge=1, le=5)
 
 
 class ReviewGenerationResponse(BaseModel):

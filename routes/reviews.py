@@ -29,31 +29,42 @@ from schemas.review import (
 )
 
 
+def _build_generation_payload(reviews: list[str], requested_count: int) -> dict:
+    """Return the payload shape expected by the frontend for suggestion generation."""
+    return {
+        "reviews": reviews[:requested_count],
+        "suggestions": reviews[:requested_count],
+    }
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.post("/generate", response_model=ReviewGenerationResponse)
 async def generate_review_suggestions(request: ReviewGenerationRequest):
     """
-    Generate 3 distinct AI review suggestions using Gemini.
+    Generate review suggestions using Gemini.
     """
-    food_tags    = request.food_tags[:3]
-    service_tags = request.service_tags[:3]
-    ambience_tags = request.ambience_tags[:3]
+    food_tags = (request.food_tags or [])[:3]
+    service_tags = (request.service_tags or [])[:3]
+    ambience_tags = (request.ambience_tags or [])[:3]
+    requested_count = max(1, min(request.count or 3, 5))
 
     reviews = await generate_suggestions(
-        request.food_rating,
-        request.service_rating,
-        request.ambience_rating,
+        request.food_rating or 5,
+        request.service_rating or 5,
+        request.ambience_rating or 5,
         food_tags,
         service_tags,
         ambience_tags,
     )
 
-    if not reviews or len(reviews) != 3:
+    if not reviews:
         raise HTTPException(
             status_code=500,
             detail="Failed to generate reviews. Please try again."
         )
+
+    reviews = reviews[:requested_count]
 
     # Log to activity_logs
     if request.restaurant_id:
@@ -78,7 +89,7 @@ async def generate_review_suggestions(request: ReviewGenerationRequest):
         except Exception as log_err:
             print(f"[generate_review_suggestions] Failed to insert activity_log: {log_err}")
 
-    return ReviewGenerationResponse(reviews=reviews)
+    return JSONResponse(_build_generation_payload(reviews, requested_count))
 
 
 @router.post("/submit")
@@ -100,7 +111,7 @@ async def submit_review(request: ReviewSubmitRequest):
         # Decision engine — uses ML predictions only
         decision = decide(ml_result)
 
-        # Build DB record (store ratings only for analytics; never use them for routing)
+        # Core review record — only essential fields guaranteed to exist in schema
         review_data = {
             "restaurant_id": request.restaurant_id,
             "review_text": request.review_text,
@@ -108,6 +119,11 @@ async def submit_review(request: ReviewSubmitRequest):
             "food_rating": request.food_rating,
             "service_rating": request.service_rating,
             "ambience_rating": request.ambience_rating,
+            "google_redirected": request.redirected_to_google,
+        }
+        
+        # Optional ML enrichment fields (try to include but don't fail if schema doesn't have them)
+        ml_enrichment = {
             "sentiment_prediction": ml_result.get("sentiment"),
             "sentiment_confidence": ml_result.get("sentiment_confidence"),
             "complaint_category": ml_result.get("complaint_category"),
@@ -115,10 +131,29 @@ async def submit_review(request: ReviewSubmitRequest):
             "severity_prediction": ml_result.get("severity"),
             "severity_confidence": ml_result.get("severity_confidence"),
             "keywords": ml_result.get("keywords", []),
-            "google_redirected": request.redirected_to_google,
             "route_decision": decision.get("route_decision"),
             "decision_reason": decision.get("reason"),
         }
+        
+        # Only add ML fields if they're non-None
+        for key, value in ml_enrichment.items():
+            if value is not None:
+                review_data[key] = value
+
+        google_review_link = None
+        if request.restaurant_id and supabase_client is not None:
+            try:
+                restaurant_res = (
+                    supabase_client
+                    .table("restaurants")
+                    .select("google_review_link")
+                    .eq("id", request.restaurant_id)
+                    .execute()
+                )
+                if restaurant_res.data:
+                    google_review_link = restaurant_res.data[0].get("google_review_link")
+            except Exception:
+                logger.exception("[submit_review] Failed to fetch restaurant redirect URL")
 
         if supabase_client is None:
             logger.warning("[submit_review] Supabase client not configured; skipping DB insert")
@@ -127,6 +162,7 @@ async def submit_review(request: ReviewSubmitRequest):
             logger.debug("[submit_review] Inserting review_data to Supabase")
             from services.supabase_service import safe_insert
 
+            # Try to insert with all fields; if schema doesn't have ML columns, they'll be silently skipped
             stored = safe_insert("reviews", review_data)
 
         # Log activity
@@ -169,6 +205,7 @@ async def submit_review(request: ReviewSubmitRequest):
             "ml": ml_result,
             "decision": decision,
             "suggestions": suggestions,
+            "google_review_link": google_review_link,
         })
 
     except Exception as e:

@@ -24,3 +24,5 @@ optimizer.pt
 
 # OS
 .DS_Store
+.vercel
+.env*

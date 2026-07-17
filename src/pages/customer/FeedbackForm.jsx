@@ -185,7 +185,7 @@ export default function FeedbackForm() {
                   setSubmitted(false);
                   // Navigate back to the review page, not to '/' which redirects to login
                   const rId = sessionStorage.getItem('reviewflow_restaurant_id');
-                  navigate(rId ? `/review/${rId}` : '/qr');
+                  navigate(rId ? `/qr?restaurantId=${encodeURIComponent(rId)}` : '/qr');
                 }}
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}

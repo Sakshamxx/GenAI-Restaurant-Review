@@ -4,7 +4,7 @@ import { motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase.js'
 
 export default function ReviewPage() {
-  const { restaurantId } = useParams()
+  const { restaurantId, tableId } = useParams()
   const navigate = useNavigate()
   const [restaurant, setRestaurant] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -49,10 +49,13 @@ export default function ReviewPage() {
   }, [restaurantId])
 
   useEffect(() => {
-    if (!loading && restaurant?.google_review_link) {
-      window.location.assign(restaurant.google_review_link)
+    if (!loading && restaurant) {
+      const params = new URLSearchParams()
+      params.set('restaurantId', restaurant.id)
+      if (tableId) params.set('tableId', tableId)
+      navigate(`/qr?${params.toString()}`, { replace: true })
     }
-  }, [loading, restaurant])
+  }, [loading, restaurant, navigate, restaurantId, tableId])
 
   return (
     <div className="flex-1 flex items-center justify-center px-4 py-12">

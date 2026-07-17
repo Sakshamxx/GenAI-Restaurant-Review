@@ -6,32 +6,33 @@ import { CheckCircle2, ExternalLink, ArrowRight } from 'lucide-react'
 export default function GoogleSuccess() {
   const navigate = useNavigate();
   const [countdown, setCountdown] = useState(4);
+  const [redirectAttempted, setRedirectAttempted] = useState(false);
 
   const restaurantName = sessionStorage.getItem('reviewflow_restaurant_name') || 'Your Restaurant';
   const googleUrl = sessionStorage.getItem('reviewflow_google_url') || '';
   const copiedReview = sessionStorage.getItem('reviewflow_copied_review') || '';
 
   useEffect(() => {
-    const timer = setInterval(() => {
+    if (!googleUrl || redirectAttempted) return;
+
+    const timer = window.setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
-          clearInterval(timer);
-          // Auto-open Google Review page after countdown
-          if (googleUrl) {
-            window.open(googleUrl, '_blank');
-          }
+          window.clearInterval(timer);
+          setRedirectAttempted(true);
+          window.location.assign(googleUrl);
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
 
-    return () => clearInterval(timer);
-  }, [googleUrl]);
+    return () => window.clearInterval(timer);
+  }, [googleUrl, redirectAttempted]);
 
   const handleManualRedirect = () => {
     if (googleUrl) {
-      window.open(googleUrl, '_blank');
+      window.location.assign(googleUrl);
     }
   };
 
@@ -57,7 +58,7 @@ export default function GoogleSuccess() {
             Redirecting to Google
           </h1>
           <p className="text-sm text-slate-400 max-w-xs mx-auto leading-relaxed">
-            Your review was copied to your clipboard. We are redirecting you to Google Reviews for <strong>{settings.restaurantName}</strong>.
+            Your review was copied to your clipboard. We are redirecting you to Google Reviews for <strong>{restaurantName}</strong>.
           </p>
         </div>
 
@@ -67,9 +68,9 @@ export default function GoogleSuccess() {
             Quick Instructions
           </span>
           <p className="text-xs text-slate-300 leading-relaxed">
-            1. We've opened Google Reviews page.<br/>
-            2. Simply **paste** your generated review.<br/>
-            3. Select **5 stars** and hit publish!
+            1. We are trying to open the Google Reviews page.<br/>
+            2. If the tab does not appear, use the button below.<br/>
+            3. Paste your review, select 5 stars, and publish.
           </p>
         </div>
 
@@ -97,7 +98,7 @@ export default function GoogleSuccess() {
         </div>
 
         <motion.button
-          onClick={() => navigate('/')}
+          onClick={() => navigate('/qr')}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           className="bg-white/5 hover:bg-white/10 text-slate-400 hover:text-slate-200 border border-white/10 rounded-xl py-2 px-5 text-xs font-semibold transition-all cursor-pointer"

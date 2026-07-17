@@ -53,27 +53,43 @@ export default function AISuggestions() {
     setPredictedSentiment(null);
 
     const restaurantId = sessionStorage.getItem('reviewflow_restaurant_id') || null;
-    generateSuggestions({ restaurantId, reviewText: '', count: 3 })
-      .then(data => {
+    const requestPayload = {
+      restaurantId,
+      reviewText: '',
+      count: 3,
+      ratings: parsedRatings,
+      foodTags: parsedTags.food,
+      serviceTags: parsedTags.service,
+      ambienceTags: parsedTags.ambience,
+    };
+
+    const loadSuggestions = async () => {
+      try {
+        const data = await Promise.race([
+          generateSuggestions(requestPayload),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000)),
+        ]);
+
         const result = data?.suggestions || data?.reviews || [];
         if (Array.isArray(result) && result.length > 0 && typeof result[0] === 'string') {
           setSuggestions(result);
           setEditableText(result[0]);
           return;
         }
+        throw new Error('No suggestions returned');
+      } catch (error) {
         const fallback = _emergencyFallback(parsedRatings);
         setSuggestions(fallback);
         setEditableText(fallback[0]);
-      })
-      .catch(() => {
-        const fallback = _emergencyFallback(parsedRatings);
-        setSuggestions(fallback);
-        setEditableText(fallback[0]);
-        setApiError('AI service unavailable. Using fallback suggestions.');
-      })
-      .finally(() => {
+        if (error?.message !== 'timeout') {
+          setApiError('AI service unavailable. Using fallback suggestions.');
+        }
+      } finally {
         setLoading(false);
-      });
+      }
+    };
+
+    loadSuggestions();
   }, []);
 
   const handleSelectSuggestion = (index) => {
@@ -111,10 +127,9 @@ export default function AISuggestions() {
       if (resp && resp.decision) {
         const route = resp.decision.route_decision;
         if (route === 'positive_flow') {
-          // copy and redirect to google
           sessionStorage.setItem('reviewflow_copied_review', editableText);
           try { await navigator.clipboard.writeText(editableText); } catch {}
-          const googleUrl = sessionStorage.getItem('reviewflow_google_url') || '';
+          const googleUrl = resp?.google_review_link || sessionStorage.getItem('reviewflow_google_url') || '';
           setTimeout(async () => {
             if (restaurantId) {
               await logActivity({
@@ -125,8 +140,11 @@ export default function AISuggestions() {
                 reviewText: editableText
               });
             }
-            if (googleUrl) window.location.href = googleUrl;
-            else navigate('/success');
+            if (googleUrl) {
+              window.location.assign(googleUrl);
+            } else {
+              navigate('/success');
+            }
           }, 1200);
           return;
         }
@@ -139,59 +157,6 @@ export default function AISuggestions() {
       // Fallback: navigate to success
       navigate('/success');
     }
-  };
-
-  // Manual Demo Routing Overrides
-  const forcePositiveFlow = async () => {
-    const restaurantId = sessionStorage.getItem('reviewflow_restaurant_id') || null;
-    const overallRating = parseFloat(((ratings.food + ratings.service + ratings.ambience) / 3).toFixed(1));
-    const googleUrl = sessionStorage.getItem('reviewflow_google_url') || '';
-
-    console.log('Rating:', overallRating);
-    console.log('Redirect URL:', googleUrl);
-
-    if (restaurantId) {
-      await submitReview({
-        restaurantId,
-        overallRating,
-        foodRating: ratings.food,
-        serviceRating: ratings.service,
-        ambienceRating: ratings.ambience,
-        reviewText: editableText,
-        redirectedToGoogle: true,
-      });
-    }
-
-    sessionStorage.setItem('reviewflow_copied_review', editableText);
-    try {
-      await navigator.clipboard.writeText(editableText);
-      showToast('Review copied! Paste it into Google Reviews.', 'success');
-    } catch {
-      showToast('Proceeding to Google Reviews.', 'info');
-    }
-
-    setTimeout(async () => {
-      if (restaurantId) {
-        await logActivity({
-          restaurantId,
-          activityType: 'google_redirect',
-          customerName: 'Anonymous',
-          rating: overallRating,
-          reviewText: editableText
-        });
-      }
-      if (googleUrl) {
-        window.location.href = googleUrl;
-      } else {
-        navigate('/success');
-      }
-    }, 1200);
-  };
-
-
-  const forceNegativeFlow = () => {
-    sessionStorage.setItem('reviewflow_draft_complaint', editableText);
-    navigate('/feedback');
   };
 
   return (
@@ -336,29 +301,6 @@ export default function AISuggestions() {
               <span>Submit Review</span>
               <ArrowRight className="w-4 h-4" />
             </motion.button>
-
-            {/* Demo Routing Controls (Requirements Page 2) */}
-            <div className="border-t border-white/5 pt-4 mt-2">
-              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest font-display block text-center mb-3">
-                Demo Walkthrough Routing Controls
-              </span>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={forcePositiveFlow}
-                  className="flex items-center justify-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/15 border border-emerald-500/25 rounded-xl py-2 px-3 text-xs font-semibold text-emerald-300 transition-colors cursor-pointer"
-                >
-                  Positive Experience →
-                  <span className="text-[10px] text-slate-400">Google Success</span>
-                </button>
-                <button
-                  onClick={forceNegativeFlow}
-                  className="flex items-center justify-center gap-1 bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/25 rounded-xl py-2 px-3 text-xs font-semibold text-amber-300 transition-colors cursor-pointer"
-                >
-                  Negative Experience →
-                  <span className="text-[10px] text-slate-400">Feedback Form</span>
-                </button>
-              </div>
-            </div>
 
           </div>
         )}

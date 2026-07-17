@@ -39,18 +39,41 @@ else:
 
 
     def safe_insert(table: str, record: dict, client=None):
-        """Insert a record into Supabase with basic error handling.
+        """Insert a record into Supabase with graceful degradation for schema mismatches.
 
         Returns the inserted row dict or None on failure.
+        On column-not-found errors, retries with only core fields.
         """
         cli = client or supabase_client
         if cli is None:
             print(f"[supabase_service] safe_insert: supabase client not configured; cannot insert into {table}")
             return None
+        
         try:
             res = cli.table(table).insert(record).execute()
             return res.data[0] if getattr(res, "data", None) else None
         except Exception as e:
+            error_str = str(e).lower()
+            # If the error is about a missing column, retry with only essential fields
+            if "could not find" in error_str and "column" in error_str:
+                print(f"[supabase_service] Schema mismatch for table {table}. Retrying with core fields only.")
+                # Core fields that should always exist
+                core_fields = {
+                    "id", "restaurant_id", "review_text", "user_rating", 
+                    "food_rating", "service_rating", "ambience_rating",
+                    "customer_name", "customer_email", "feedback_text", "feedback_message",
+                    "activity_type", "rating", "metadata",
+                    "created_at", "updated_at"
+                }
+                filtered_record = {k: v for k, v in record.items() if k in core_fields}
+                if filtered_record and filtered_record != record:
+                    try:
+                        res = cli.table(table).insert(filtered_record).execute()
+                        print(f"[supabase_service] Retry succeeded with {len(filtered_record)} fields")
+                        return res.data[0] if getattr(res, "data", None) else None
+                    except Exception as retry_err:
+                        print(f"[supabase_service] Retry also failed: {retry_err}")
+                        return None
             print(f"[supabase_service] safe_insert error for table {table}: {e}")
             return None
 

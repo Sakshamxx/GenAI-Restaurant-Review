@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Star, Utensils, HeartHandshake, Home, Check, Sparkles, Lock } from 'lucide-react'
 import { supabase } from '../../lib/supabase.js'
@@ -32,18 +32,22 @@ function isLikelyUuid(value) {
 
 export default function QRScan() {
   const navigate = useNavigate();
-  const { restaurantId, tableId } = useParams();
+  const location = useLocation();
+  const { restaurantId: routeRestaurantId, tableId: routeTableId } = useParams();
+  const queryParams = new URLSearchParams(location.search);
+  const restaurantId = routeRestaurantId || queryParams.get('restaurantId') || sessionStorage.getItem('reviewflow_restaurant_id');
+  const tableId = routeTableId || queryParams.get('tableId') || sessionStorage.getItem('reviewflow_table_id');
   const [restaurantName, setRestaurantName] = useState('Welcome');
   const [statusMessage, setStatusMessage] = useState('');
 
   // Fetch restaurant from Supabase and store config in sessionStorage
   useEffect(() => {
     if (restaurantId) {
-      console.log('[QRScan] Found restaurantId in url params:', restaurantId);
+      console.log('[QRScan] Found restaurantId:', restaurantId);
       sessionStorage.setItem('reviewflow_restaurant_id', restaurantId);
     }
     if (tableId) {
-      console.log('[QRScan] Found tableId in url params:', tableId);
+      console.log('[QRScan] Found tableId:', tableId);
       sessionStorage.setItem('reviewflow_table_id', tableId);
     }
 

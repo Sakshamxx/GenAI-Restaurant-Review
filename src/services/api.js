@@ -128,12 +128,20 @@ export async function generateSuggestions(payload) {
   return apiCall(
     async () => {
       const body = {
-        review_text: payload.reviewText,
+        review_text: payload.reviewText || '',
         restaurant_id: payload.restaurantId || null,
         count: payload.count || 3,
+        food_rating: payload.foodRating ?? payload.ratings?.food ?? 5,
+        service_rating: payload.serviceRating ?? payload.ratings?.service ?? 5,
+        ambience_rating: payload.ambienceRating ?? payload.ratings?.ambience ?? 5,
+        food_tags: payload.foodTags || [],
+        service_tags: payload.serviceTags || [],
+        ambience_tags: payload.ambienceTags || [],
       }
       const resp = await client.post('/api/reviews/generate', body)
-      if (!resp.data.suggestions || resp.data.suggestions.length === 0) {
+      // Accept either 'suggestions' or 'reviews' key from backend
+      const suggestions = resp.data.suggestions || resp.data.reviews || []
+      if (!Array.isArray(suggestions) || suggestions.length === 0) {
         throw new Error('No suggestions generated')
       }
       return resp.data

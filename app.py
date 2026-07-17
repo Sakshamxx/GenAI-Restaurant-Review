@@ -79,10 +79,15 @@ frontend_origins.extend([
     "http://localhost:4173",
 ])
 allow_origins = list(dict.fromkeys(frontend_origins))
+allow_origin_regex = os.getenv(
+    "FRONTEND_ORIGIN_REGEX",
+    r"https://.*\.vercel\.(app|dev)|http://localhost:\d+",
+)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
+    allow_origin_regex=allow_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
