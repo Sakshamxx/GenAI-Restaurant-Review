@@ -26,10 +26,15 @@ const AMBIENCE_TAGS = {
 
 const TAG_MAX = 3; // Maximum tags per category (Task 4)
 
+function isLikelyUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value || '');
+}
+
 export default function QRScan() {
   const navigate = useNavigate();
   const { restaurantId, tableId } = useParams();
   const [restaurantName, setRestaurantName] = useState('Welcome');
+  const [statusMessage, setStatusMessage] = useState('');
 
   // Fetch restaurant from Supabase and store config in sessionStorage
   useEffect(() => {
@@ -45,41 +50,55 @@ export default function QRScan() {
     // Load restaurant details for display + google URL, then increment scan count
     const loadRestaurant = async () => {
       if (!restaurantId) {
+        setStatusMessage('This QR link is missing a restaurant identifier.');
         console.warn('[QRScan] No restaurantId provided, skipping DB fetch.');
         return;
       }
-      console.log('[QRScan] Fetching restaurant info from Supabase for ID:', restaurantId);
-      const { data } = await supabase
-        .from('restaurants')
-        .select('restaurant_name, google_review_link')
-        .eq('id', restaurantId)
-        .maybeSingle();
 
-      if (data) {
-        console.log('[QRScan] Successfully fetched restaurant data:', data);
-        setRestaurantName(data.restaurant_name || 'Restaurant');
-        sessionStorage.setItem('reviewflow_restaurant_name', data.restaurant_name || '');
-        if (data.google_review_link) {
-          console.log('[QRScan] Google Review Link stored in session:', data.google_review_link);
-          sessionStorage.setItem('reviewflow_google_url', data.google_review_link);
-        } else {
-          console.warn('[QRScan] Google Review Link is missing or empty in restaurant record!');
+      if (!isLikelyUuid(restaurantId)) {
+        setStatusMessage('This QR link is invalid. Please contact the restaurant.');
+        console.warn('[QRScan] Invalid restaurant id format:', restaurantId);
+        return;
+      }
+
+      try {
+        console.log('[QRScan] Fetching restaurant info from Supabase for ID:', restaurantId);
+        const { data, error } = await supabase
+          .from('restaurants')
+          .select('restaurant_name, google_review_link')
+          .eq('id', restaurantId)
+          .maybeSingle();
+
+        if (error) {
+          throw error;
         }
-        
-        // Fetch the local threshold override if configured on this browser
-        const localConfig = JSON.parse(localStorage.getItem('reviewflow_local_config') || '{}');
-        const threshold = localConfig.min_review_threshold ?? 4.0;
-        console.log('[QRScan] Storing local min_review_threshold override:', threshold);
-        sessionStorage.setItem('reviewflow_min_review_threshold', threshold.toString());
 
-        // Increment scan count on backend (fire-and-forget)
-        console.log('[QRScan] Incrementing scan count for restaurant:', restaurantId);
-        fetch(`${BACKEND_URL}/api/qr/scan/${restaurantId}`, { method: 'POST' })
-          .then(r => r.json())
-          .then(d => console.log('[QRScan] Scan incremented. Total scans:', d.total_scans))
-          .catch(e => console.warn('[QRScan] Could not increment scan count:', e.message));
-      } else {
-        console.error('[QRScan] Restaurant not found in DB for ID:', restaurantId);
+        if (data) {
+          console.log('[QRScan] Successfully fetched restaurant data:', data);
+          setRestaurantName(data.restaurant_name || 'Restaurant');
+          sessionStorage.setItem('reviewflow_restaurant_name', data.restaurant_name || '');
+          if (data.google_review_link) {
+            sessionStorage.setItem('reviewflow_google_url', data.google_review_link);
+          } else {
+            setStatusMessage('This restaurant has not configured a Google review link yet.');
+          }
+
+          const localConfig = JSON.parse(localStorage.getItem('reviewflow_local_config') || '{}');
+          const threshold = localConfig.min_review_threshold ?? 4.0;
+          sessionStorage.setItem('reviewflow_min_review_threshold', threshold.toString());
+
+          if (BACKEND_URL) {
+            fetch(`${BACKEND_URL}/api/qr/scan/${restaurantId}`, { method: 'POST' })
+              .then(r => r.json())
+              .catch(e => console.warn('[QRScan] Could not increment scan count:', e.message));
+          }
+        } else {
+          setStatusMessage('This QR code could not be matched to a restaurant.');
+          console.error('[QRScan] Restaurant not found in DB for ID:', restaurantId);
+        }
+      } catch (err) {
+        setStatusMessage('Unable to load this review experience right now.');
+        console.error('[QRScan] Failed to load restaurant data:', err);
       }
     };
 
@@ -173,6 +192,9 @@ export default function QRScan() {
             Rate Your Experience
             {tableId && <span className="ml-2 text-brand-400 font-semibold">· {tableId}</span>}
           </p>
+          {statusMessage && (
+            <p className="mt-2 text-xs text-amber-300">{statusMessage}</p>
+          )}
         </div>
 
         {/* Section 1: Star Ratings */}
