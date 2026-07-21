@@ -121,7 +121,7 @@ export default function ReviewsList() {
                         </h3>
                         <span className="text-[10px] text-slate-500 block mt-0.5">
                           {new Date(rev.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                          {rev.redirected_to_google && ' • Redirected to Google'}
+                          {(rev.redirected_to_google || rev.google_redirected) && ' • Redirected to Google'}
                         </span>
                       </div>
                     </div>

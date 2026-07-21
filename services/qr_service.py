@@ -2,21 +2,23 @@
 ReviewFlow AI — QR Code Generation Service
 
 Generates real PNG QR codes for a restaurant using the qrcode + Pillow libraries.
-QR content: the restaurant's google_review_link (passed in by the caller).
+QR content: the restaurant review funnel URL for the customer review flow.
 """
 
 import io
+import os
 import qrcode
 from qrcode.image.styledpil import StyledPilImage
 from qrcode.image.styles.moduledrawers.pil import RoundedModuleDrawer
 from PIL import Image, ImageDraw, ImageFont
+from typing import Optional
 
 
 def generate_qr_png(qr_url: str, restaurant_name: str) -> bytes:
     """
     Generate a PNG QR code that encodes `qr_url`.
 
-    qr_url          — the exact URL baked into the QR (e.g. google_review_link)
+    qr_url          — the exact review funnel URL baked into the QR (e.g. /customer/review/<restaurant_id>)
     restaurant_name — printed as a label below the QR image
 
     Returns raw PNG bytes.
@@ -68,7 +70,7 @@ def generate_qr_png(qr_url: str, restaurant_name: str) -> bytes:
         font_sub   = ImageFont.load_default()
 
     label_text = restaurant_name
-    sub_text   = "Scan to leave a Google Review"
+    sub_text   = "Scan to start your ReviewFlow experience"
 
     label_y = qr_height + padding + 8
     sub_y   = label_y + 22
@@ -103,6 +105,32 @@ def generate_qr_png(qr_url: str, restaurant_name: str) -> bytes:
     return buffer.getvalue()
 
 
-def get_qr_url(google_review_link: str) -> str:
-    """Return the URL that the QR code encodes (the google_review_link)."""
-    return google_review_link or ""
+def get_frontend_origin() -> str:
+    """Return the configured frontend origin for review funnels."""
+    origin = os.getenv("FRONTEND_ORIGIN", "").strip().strip('"').strip("'")
+    if not origin:
+        raise ValueError("FRONTEND_ORIGIN environment variable is required to build review funnel URLs.")
+    if not origin.startswith(("http://", "https://")):
+        raise ValueError("FRONTEND_ORIGIN must be a valid absolute URL starting with http:// or https://.")
+    return origin.rstrip('/')
+
+
+def build_review_funnel_url(restaurant_id: str, request_origin: Optional[str] = None) -> str:
+    """Return the review funnel URL encoded into each QR code."""
+    env_origin = os.getenv("FRONTEND_ORIGIN", "").strip().strip('"').strip("'")
+
+    origin = None
+    if request_origin:
+        request_origin = request_origin.strip().strip('"').strip("'")
+        if request_origin.startswith(("http://", "https://")):
+            origin = request_origin.rstrip('/')
+
+    if not origin and env_origin:
+        if not env_origin.startswith(("http://", "https://")):
+            raise ValueError("FRONTEND_ORIGIN must be a valid absolute URL starting with http:// or https://.")
+        origin = env_origin.rstrip('/')
+
+    if not origin:
+        raise ValueError("FRONTEND_ORIGIN environment variable is required to build review funnel URLs.")
+
+    return f"{origin}/customer/review/{restaurant_id}"

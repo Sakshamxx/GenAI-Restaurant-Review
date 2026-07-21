@@ -223,7 +223,7 @@ Summarization	Gemini / LLM
 
 Frontend
 
-* Next.js
+* Vite
 * React
 * Tailwind CSS
 * ShadCN UI
@@ -255,6 +255,24 @@ Deployment
 * Vercel
 * Supabase
 * Docker
+
+## Local Environment Setup
+
+Copy `.env.example` to `.env` and `frontend.env.example` to `frontend.env` before running the app. Do not commit these files.
+
+Backend `.env` must contain:
+- `FRONTEND_ORIGIN`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `Gemini_API_Key`
+- `Email_API_Key`
+
+Frontend `frontend.env` must contain:
+- `VITE_APP_URL`
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+- `VITE_API_URL`
+- `VITE_BACKEND_URL`
 
 ⸻
 

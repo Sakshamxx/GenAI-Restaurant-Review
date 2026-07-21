@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { MessageSquare, Link2, AlertTriangle, Smartphone, RefreshCw, Loader2 } from 'lucide-react'
-import { getActivityLogs } from '../../services/api.js'
+import { getActivityLogs } from '../../services/supabase_db.js'
 import { Toast } from '../../lib/errorHandler.js'
 
 export default function ActivityTimeline({ restaurantId }) {
@@ -42,7 +42,7 @@ export default function ActivityTimeline({ restaurantId }) {
         return <MessageSquare size={20} className="text-blue-500" />
       case 'google_redirect':
         return <Link2 size={20} className="text-green-500" />
-      case 'complaint_received':
+      case 'complaint_submitted':
         return <AlertTriangle size={20} className="text-red-500" />
       case 'qr_scanned':
         return <Smartphone size={20} className="text-purple-500" />
@@ -57,7 +57,7 @@ export default function ActivityTimeline({ restaurantId }) {
         return 'Review Submitted'
       case 'google_redirect':
         return 'Google Review'
-      case 'complaint_received':
+      case 'complaint_submitted':
         return 'Complaint'
       case 'qr_scanned':
         return 'QR Scan'
@@ -72,7 +72,7 @@ export default function ActivityTimeline({ restaurantId }) {
         return 'bg-blue-50 border-blue-200'
       case 'google_redirect':
         return 'bg-green-50 border-green-200'
-      case 'complaint_received':
+      case 'complaint_submitted':
         return 'bg-red-50 border-red-200'
       case 'qr_scanned':
         return 'bg-purple-50 border-purple-200'
@@ -89,7 +89,7 @@ export default function ActivityTimeline({ restaurantId }) {
     { value: 'all', label: 'All', count: activities.length },
     { value: 'review_submitted', label: 'Reviews', count: activities.filter(a => a.activity_type === 'review_submitted').length },
     { value: 'google_redirect', label: 'Redirects', count: activities.filter(a => a.activity_type === 'google_redirect').length },
-    { value: 'complaint_received', label: 'Complaints', count: activities.filter(a => a.activity_type === 'complaint_received').length },
+    { value: 'complaint_submitted', label: 'Complaints', count: activities.filter(a => a.activity_type === 'complaint_submitted').length },
     { value: 'qr_scanned', label: 'Scans', count: activities.filter(a => a.activity_type === 'qr_scanned').length },
   ]
 
@@ -187,8 +187,8 @@ export default function ActivityTimeline({ restaurantId }) {
                         {activity.metadata.sentiment && (
                           <p>💭 Sentiment: <span className="font-medium">{activity.metadata.sentiment}</span></p>
                         )}
-                        {activity.metadata.severity && (
-                          <p>📊 Severity: <span className="font-medium">{activity.metadata.severity}</span></p>
+                        {activity.metadata.category && (
+                          <p>📝 Category: <span className="font-medium">{activity.metadata.category}</span></p>
                         )}
                         {activity.rating && (
                           <p>⭐ Rating: <span className="font-medium">{activity.rating}</span></p>

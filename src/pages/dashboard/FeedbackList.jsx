@@ -42,7 +42,7 @@ export default function FeedbackList() {
 
   const filteredFeedback = feedbackList.filter(feed => {
     const text = (feed.feedback_text || '').toLowerCase();
-    const cat = (feed.category || '').toLowerCase();
+    const cat = (feed.category || 'Private Feedback').toLowerCase();
     const matchesSearch =
       text.includes(searchTerm.toLowerCase()) ||
       cat.includes(searchTerm.toLowerCase());
@@ -135,7 +135,7 @@ export default function FeedbackList() {
                           </span>
                         </h3>
                         <span className="text-[10px] text-slate-500 block mt-0.5">
-                          {feed.category} • {new Date(feed.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                          {(feed.category || 'Private Feedback')} • {new Date(feed.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                         </span>
                       </div>
                     </div>
@@ -166,13 +166,11 @@ export default function FeedbackList() {
                   <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-white/5">
                     <div className="flex flex-wrap gap-1.5">
                       <span className="bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-full px-2.5 py-0.5 text-[10px] font-semibold">
-                        {feed.category}
+                        {feed.category || 'Private Feedback'}
                       </span>
-                      {feed.severity && (
-                        <span className="bg-white/5 border border-white/10 text-slate-400 rounded-full px-2.5 py-0.5 text-[10px] font-semibold">
-                          {feed.severity}
-                        </span>
-                      )}
+                      <span className="bg-white/5 border border-white/10 text-slate-400 rounded-full px-2.5 py-0.5 text-[10px] font-semibold">
+                        {feed.severity || 'Open'}
+                      </span>
                     </div>
                     {feed.customer_name && (
                       <span className="text-[10px] text-slate-500 font-semibold">

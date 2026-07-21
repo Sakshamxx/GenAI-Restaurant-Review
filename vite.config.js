@@ -34,13 +34,17 @@ function loadEnvFiles(mode) {
 export default defineConfig(({ mode }) => {
   const env = loadEnvFiles(mode)
 
+  const define = {}
+  for (const key in env) {
+    if (key.startsWith('VITE_')) {
+      const value = JSON.stringify(env[key])
+      define[`import.meta.env.${key}`] = value
+      define[`process.env.${key}`] = value
+    }
+  }
+
   return {
     plugins: [react()],
-    define: {
-      'process.env': {
-        SUPABASE_URL: env.SUPABASE_URL || '',
-        SUPABASE_ANON_KEY: env.SUPABASE_ANON_KEY || '',
-      }
-    },
+    define,
   }
 })

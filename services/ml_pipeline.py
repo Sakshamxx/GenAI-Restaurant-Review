@@ -35,15 +35,9 @@ def load_models() -> None:
 def get_models() -> Dict:
     """Return handles to loaded model objects (delegates to ml_service internals)."""
     return {
-        "sentiment_vect": getattr(ml_service, "_sentiment_vect", None),
         "sentiment_model": getattr(ml_service, "_sentiment_model", None),
+        "sentiment_vocab": getattr(ml_service, "_sentiment_vocab", None),
         "sentiment_le": getattr(ml_service, "_sentiment_le", None),
-        "severity_vect": getattr(ml_service, "_severity_vect", None),
-        "severity_model": getattr(ml_service, "_severity_model", None),
-        "severity_le": getattr(ml_service, "_severity_le", None),
-        "complaint_model": getattr(ml_service, "_complaint_model", None),
-        "complaint_vocab": getattr(ml_service, "_complaint_vocab", None),
-        "complaint_le": getattr(ml_service, "_complaint_le", None),
     }
 
 
@@ -55,6 +49,4 @@ def get_model_health() -> Dict[str, str]:
 
     return {
         "sentiment_model": status_label(models.get("sentiment_model")),
-        "complaint_model": status_label(models.get("complaint_model")),
-        "severity_model": status_label(models.get("severity_model")),
     }

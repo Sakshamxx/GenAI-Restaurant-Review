@@ -12,10 +12,9 @@ from fastapi.responses import JSONResponse
 import logging
 
 from services.review_generation import generate_suggestions
-from services.supabase_service import supabase_client
+from services.supabase_service import supabase_client, safe_insert
 from services.ml_service import analyze_text
 from services.decision_engine import decide
-from services.review_generation import generate_suggestions
 
 logger = logging.getLogger(__name__)
 
@@ -104,12 +103,11 @@ async def submit_review(request: ReviewSubmitRequest):
     try:
         logger.info("[submit_review] Received review for restaurant %s", request.restaurant_id)
 
-        # Run ML pipeline (sentiment, complaint, severity) — driver for routing
         ml_result = analyze_text(request.review_text)
         logger.info("[submit_review] ML result: %s", ml_result)
 
-        # Decision engine — uses ML predictions only
         decision = decide(ml_result)
+        google_redirected = decision.get("route_decision") == "positive_flow"
 
         # Core review record — only essential fields guaranteed to exist in schema
         review_data = {
@@ -119,18 +117,13 @@ async def submit_review(request: ReviewSubmitRequest):
             "food_rating": request.food_rating,
             "service_rating": request.service_rating,
             "ambience_rating": request.ambience_rating,
-            "google_redirected": request.redirected_to_google,
+            "google_redirected": google_redirected,
         }
         
         # Optional ML enrichment fields (try to include but don't fail if schema doesn't have them)
         ml_enrichment = {
             "sentiment_prediction": ml_result.get("sentiment"),
             "sentiment_confidence": ml_result.get("sentiment_confidence"),
-            "complaint_category": ml_result.get("complaint_category"),
-            "complaint_confidence": ml_result.get("complaint_confidence"),
-            "severity_prediction": ml_result.get("severity"),
-            "severity_confidence": ml_result.get("severity_confidence"),
-            "keywords": ml_result.get("keywords", []),
             "route_decision": decision.get("route_decision"),
             "decision_reason": decision.get("reason"),
         }
@@ -160,17 +153,19 @@ async def submit_review(request: ReviewSubmitRequest):
             stored = None
         else:
             logger.debug("[submit_review] Inserting review_data to Supabase")
-            from services.supabase_service import safe_insert
-
-            # Try to insert with all fields; if schema doesn't have ML columns, they'll be silently skipped
+            print(f"[submit_review] review_data: {review_data}")
             stored = safe_insert("reviews", review_data)
+            print(f"[submit_review] review insert result: {stored}")
+            if stored is not None:
+                if "google_redirected" in stored and "redirected_to_google" not in stored:
+                    stored["redirected_to_google"] = stored.get("google_redirected")
+                elif "redirected_to_google" in stored and "google_redirected" not in stored:
+                    stored["google_redirected"] = stored.get("redirected_to_google")
 
         # Log activity
         try:
             if supabase_client is not None:
-                from services.supabase_service import safe_insert
-
-                safe_insert("activity_logs", {
+                activity_payload = {
                     "restaurant_id": request.restaurant_id,
                     "activity_type": "review_submitted",
                     "customer_name": "Anonymous",
@@ -181,7 +176,25 @@ async def submit_review(request: ReviewSubmitRequest):
                         "ml": ml_result,
                         "decision": decision,
                     }
-                })
+                }
+                print(f"[submit_review] logging activity: {activity_payload}")
+                safe_insert("activity_logs", activity_payload)
+
+                if google_redirected:
+                    positive_payload = {
+                        "restaurant_id": request.restaurant_id,
+                        "activity_type": "positive_review",
+                        "customer_name": "Anonymous",
+                        "rating": request.overall_rating,
+                        "review_text": request.review_text,
+                        "feedback_text": "",
+                        "metadata": {
+                            "ml": ml_result,
+                            "decision": decision,
+                        }
+                    }
+                    print(f"[submit_review] logging positive review activity: {positive_payload}")
+                    safe_insert("activity_logs", positive_payload)
         except Exception:
             logger.exception("[submit_review] Failed to log activity")
 

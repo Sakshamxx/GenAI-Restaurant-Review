@@ -26,8 +26,11 @@ const AMBIENCE_TAGS = {
 
 const TAG_MAX = 3; // Maximum tags per category (Task 4)
 
-function isLikelyUuid(value) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value || '');
+function isLikelyRestaurantId(value) {
+  if (!value) return false
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+  const isNumeric = /^[0-9]+$/.test(value)
+  return isUuid || isNumeric
 }
 
 export default function QRScan() {
@@ -59,7 +62,7 @@ export default function QRScan() {
         return;
       }
 
-      if (!isLikelyUuid(restaurantId)) {
+      if (!isLikelyRestaurantId(restaurantId)) {
         setStatusMessage('This QR link is invalid. Please contact the restaurant.');
         console.warn('[QRScan] Invalid restaurant id format:', restaurantId);
         return;

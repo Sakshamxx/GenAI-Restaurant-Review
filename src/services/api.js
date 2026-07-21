@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { Toast, apiCall } from '../lib/errorHandler.js'
+import { upsertRestaurant } from './supabase_db.js'
 
 const BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL || ''
 
@@ -85,7 +86,6 @@ export async function submitFeedback(payload) {
         customer_name: payload.customerName || 'Anonymous',
         customer_email: payload.customerEmail || 'anonymous@example.com',
         feedback_message: payload.feedbackText,
-        feedback_categories: payload.feedbackCategories || (payload.category ? [payload.category] : []),
         rating_summary: payload.ratingSummary || 'N/A'
       }
       const resp = await client.post('/api/feedback/submit', body)
@@ -113,8 +113,6 @@ export async function getModelHealth() {
     console.error('Failed to get model health:', error)
     return {
       sentiment_model: 'unknown',
-      complaint_model: 'unknown',
-      severity_model: 'unknown',
     }
   }
 }
@@ -164,8 +162,8 @@ export async function generateSuggestions(payload) {
 export async function getRestaurantReviews(restaurantId) {
   return apiCall(
     async () => {
-      const resp = await client.get(`/api/restaurants/${restaurantId}/reviews`)
-      return resp.data.reviews || []
+      const resp = await client.get(`/api/reviews/list`, { params: { restaurant_id: restaurantId } })
+      return resp.data || []
     },
     { retries: 1 }
   )
@@ -179,8 +177,8 @@ export async function getRestaurantReviews(restaurantId) {
 export async function getAnalytics(restaurantId) {
   return apiCall(
     async () => {
-      const resp = await client.get(`/api/restaurants/${restaurantId}/analytics`)
-      return resp.data
+      const resp = await client.get(`/api/activity/stats`, { params: { restaurant_id: restaurantId } })
+      return resp.data || {}
     },
     { retries: 1 }
   )
@@ -194,8 +192,8 @@ export async function getAnalytics(restaurantId) {
 export async function getActivityLogs(restaurantId) {
   return apiCall(
     async () => {
-      const resp = await client.get(`/api/restaurants/${restaurantId}/activity`)
-      return resp.data.activities || []
+      const resp = await client.get(`/api/activity/list`, { params: { restaurant_id: restaurantId } })
+      return resp.data || []
     },
     { retries: 1 }
   )
@@ -260,16 +258,15 @@ export async function deleteQRCode(qrToken) {
 export async function updateRestaurantSettings(payload) {
   return apiCall(
     async () => {
-      const body = {
+      const updated = await upsertRestaurant({
         restaurant_name: payload.restaurantName,
         address: payload.address,
         phone: payload.phone,
         google_review_link: payload.googleReviewLink,
-        notification_email: payload.notificationEmail,
-      }
-      const resp = await client.post('/api/restaurants/settings', body)
+        owner_email: payload.notificationEmail,
+      })
       Toast.success('Settings saved successfully')
-      return resp.data
+      return updated
     },
     { retries: 1 }
   )

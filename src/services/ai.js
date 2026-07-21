@@ -56,7 +56,7 @@ export async function generateMockReviewSuggestions(ratings, selectedTags, resta
  * @param {string} params.ratingSummary - e.g. "Food: 2/5, Service: 3/5, Ambience: 2/5"
  * @returns {Promise<boolean>} true if submitted successfully
  */
-export async function submitFeedbackToBackend({ restaurantId, tableNumber, feedbackCategories, feedbackMessage, ratingSummary }) {
+export async function submitFeedbackToBackend({ restaurantId, tableNumber, feedbackMessage, ratingSummary }) {
   try {
     const response = await fetch(`${BACKEND_URL}/api/feedback/submit`, {
       method: 'POST',
@@ -65,7 +65,6 @@ export async function submitFeedbackToBackend({ restaurantId, tableNumber, feedb
         restaurant_id: restaurantId || 'unknown',
         customer_name: 'Anonymous',
         customer_email: 'anonymous@example.com',
-        feedback_categories: feedbackCategories || [],
         feedback_message: feedbackMessage || '',
         rating_summary: ratingSummary || 'N/A',
       }),

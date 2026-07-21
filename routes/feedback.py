@@ -3,18 +3,13 @@ ReviewFlow AI — Private Feedback Routes
 
 Handles private feedback submission, storing in Supabase 'feedback' table,
 email alerts via Resend to the restaurant owner, and listing feedback.
-
-ML pipeline enriches every submission with:
-  - category  (predicted by Complaint Classifier Transformer)
-  - severity  (predicted by Severity Logistic Regression)
 """
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 from fastapi.responses import JSONResponse
-from services.supabase_service import supabase_client
+from services.supabase_service import supabase_client, safe_insert
 from services.email_service import send_feedback_notification
-from services.ml_service import analyze_text
 
 router = APIRouter(prefix="/api/feedback", tags=["feedback"])
 
@@ -23,7 +18,6 @@ class FeedbackSubmitRequest(BaseModel):
     restaurant_id: str
     customer_name: str = "Anonymous"
     customer_email: str = "anonymous@example.com"
-    feedback_categories: list[str] = Field(default=[], description="Optional user-supplied complaint categories")
     feedback_message: str = Field(..., description="Customer feedback text")
     rating_summary: str = "N/A"   # e.g. "Food: 2/5, Service: 3/5, Ambience: 2/5"
 
@@ -49,14 +43,6 @@ async def submit_feedback(request: FeedbackSubmitRequest):
         print(f"[submit_feedback] Received feedback for restaurant {request.restaurant_id}")
         print(f"[submit_feedback] feedback_message: {request.feedback_message[:120]}...")
 
-        # ── 1. ML Enrichment ──────────────────────────────────────────────
-        ml_result = analyze_text(request.feedback_message)
-        print(f"[submit_feedback] ML result: {ml_result}")
-
-        # ML-predicted category and severity take precedence over user-supplied ones
-        ml_category = ml_result.get("category", "General Dissatisfaction")
-        ml_severity  = ml_result.get("severity", "Medium")
-
         # ── 2. Fetch restaurant record ────────────────────────────────────
         rest_res = (
             supabase_client
@@ -73,9 +59,9 @@ async def submit_feedback(request: FeedbackSubmitRequest):
                 detail="Restaurant not found.",
             )
 
-        restaurant      = rest_res.data[0]
+        restaurant = rest_res.data[0]
         restaurant_name = restaurant.get("restaurant_name", "Your Restaurant")
-        owner_email     = restaurant.get("owner_email", "")
+        owner_email = restaurant.get("owner_email", "")
 
         if not owner_email:
             raise HTTPException(
@@ -85,73 +71,56 @@ async def submit_feedback(request: FeedbackSubmitRequest):
 
         # ── 3. Build and insert feedback record ───────────────────────────
         feedback_data = {
-            "restaurant_id":  request.restaurant_id,
-            "customer_name":  request.customer_name,
+            "restaurant_id": request.restaurant_id,
+            "customer_name": request.customer_name,
             "customer_email": request.customer_email,
-            "category":       ml_category,
-            "severity":       ml_severity,
-            "feedback_text":  request.feedback_message,
-            "resolved":       False,
+            "feedback_text": request.feedback_message,
+            "resolved": False,
         }
 
         print(f"[submit_feedback] Inserting feedback_data: {feedback_data}")
-        feed_insert = supabase_client.table("feedback").insert(feedback_data).execute()
-        print(f"[submit_feedback] Supabase response: {feed_insert.data}")
+        feedback_row = safe_insert("feedback", feedback_data)
+        print(f"[submit_feedback] Safe feedback insert result: {feedback_row}")
 
-        if not feed_insert.data:
+        if not feedback_row:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to record private feedback.",
             )
 
-        # Log activities to activity_logs table
+        # Log activity to activity_logs table
         try:
-            # Parse ratings if possible
-            numeric_rating = None
-            try:
-                if "Food:" in request.rating_summary:
-                    parts = request.rating_summary.split(",")
-                    ratings_list = []
-                    for part in parts:
-                        val = int(part.split(":")[1].split("/")[0].strip())
-                        ratings_list.append(val)
-                    if ratings_list:
-                        numeric_rating = round(sum(ratings_list) / len(ratings_list), 1)
-            except Exception:
-                pass
-
-            # Log private_feedback
-            supabase_client.table("activity_logs").insert({
+            activity_payload = {
                 "restaurant_id": request.restaurant_id,
                 "activity_type": "private_feedback",
                 "customer_name": request.customer_name or "Anonymous",
-                "rating": numeric_rating,
+                "rating": None,
                 "review_text": "",
                 "feedback_text": request.feedback_message,
                 "metadata": {
                     "customer_email": request.customer_email,
-                    "category": ml_category,
-                    "severity": ml_severity,
-                    "rating_summary": request.rating_summary
-                }
-            }).execute()
+                    "rating_summary": request.rating_summary,
+                },
+            }
+            print(f"[submit_feedback] logging activity: {activity_payload}")
+            safe_insert("activity_logs", activity_payload)
+            print(f"[submit_feedback] Logged private_feedback activity for {request.restaurant_id}")
 
-            # Log complaint_submitted
-            supabase_client.table("activity_logs").insert({
+            complaint_payload = {
                 "restaurant_id": request.restaurant_id,
                 "activity_type": "complaint_submitted",
                 "customer_name": request.customer_name or "Anonymous",
-                "rating": numeric_rating,
+                "rating": None,
                 "review_text": "",
                 "feedback_text": request.feedback_message,
                 "metadata": {
                     "customer_email": request.customer_email,
-                    "category": ml_category,
-                    "severity": ml_severity,
-                    "rating_summary": request.rating_summary
-                }
-            }).execute()
-            print(f"[submit_feedback] Logged private_feedback and complaint_submitted activities for {request.restaurant_id}")
+                    "rating_summary": request.rating_summary,
+                },
+            }
+            print(f"[submit_feedback] logging activity: {complaint_payload}")
+            safe_insert("activity_logs", complaint_payload)
+            print(f"[submit_feedback] Logged complaint_submitted activity for {request.restaurant_id}")
         except Exception as log_err:
             print(f"[submit_feedback] Failed to insert activity_log: {log_err}")
 

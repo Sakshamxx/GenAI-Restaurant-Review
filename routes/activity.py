@@ -106,13 +106,13 @@ async def get_activity_stats(restaurant_id: str):
         logs = res.data or []
         
         total_scans = sum(1 for log in logs if log.get("activity_type") == "qr_scanned")
-        total_reviews = sum(1 for log in logs if log.get("activity_type") in ("positive_review", "review_generated"))
+        total_reviews = sum(1 for log in logs if log.get("activity_type") == "review_submitted")
         redirects = sum(1 for log in logs if log.get("activity_type") == "google_redirect")
-        total_feedback = sum(1 for log in logs if log.get("activity_type") in ("private_feedback", "complaint_submitted"))
-        
-        # Calculate average rating from all logs with a rating
-        ratings = [log["rating"] for log in logs if log.get("rating") is not None]
-        avg_rating = round(sum(ratings) / len(ratings), 1) if ratings else 0.0
+        total_feedback = sum(1 for log in logs if log.get("activity_type") == "private_feedback")
+
+        # Calculate average rating only from submitted review logs
+        ratings = [log["rating"] for log in logs if log.get("activity_type") == "review_submitted" and log.get("rating") is not None]
+        avg_rating = round(sum(ratings) / len(ratings), 2) if ratings else 0
         
         redirect_rate = round((redirects / total_scans) * 100) if total_scans > 0 else 0
         

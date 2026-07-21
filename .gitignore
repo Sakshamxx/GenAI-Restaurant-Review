@@ -3,7 +3,9 @@
 __pycache__/
 .env
 .env.*
+!.env.example
 frontend.env
+!frontend.env.example
 
 # Node
 node_modules/

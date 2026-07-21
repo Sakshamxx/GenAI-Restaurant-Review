@@ -244,7 +244,13 @@ export async function getReviews(restaurantId) {
     console.error('[supabase_db] getReviews error:', error.message)
     return []
   }
-  return data || []
+  return (data || []).map((rev) => ({
+    ...rev,
+    overall_rating: rev.overall_rating ?? rev.user_rating ?? ((rev.food_rating || 0) + (rev.service_rating || 0) + (rev.ambience_rating || 0)) / 3,
+    sentiment: rev.sentiment || rev.sentiment_prediction || rev.sentiment_label || undefined,
+    redirected_to_google: rev.redirected_to_google ?? rev.google_redirected ?? false,
+    google_redirected: rev.google_redirected ?? rev.redirected_to_google ?? false,
+  }))
 }
 
 /**
@@ -306,9 +312,8 @@ export async function getFeedback(restaurantId) {
 /**
  * Insert a feedback/complaint record.
  */
-export async function addFeedback({ restaurantId, customerName, customerEmail,
-  category, severity, feedbackText, feedbackCategories, ratingSummary }) {
-  console.log('[supabase_db] addFeedback calling backend API...', { restaurantId, category });
+export async function addFeedback({ restaurantId, customerName, customerEmail, feedbackText, ratingSummary }) {
+  console.log('[supabase_db] addFeedback calling backend API...', { restaurantId });
   try {
     const response = await fetch(`${BACKEND_URL}/api/feedback/submit`, {
       method: 'POST',
@@ -318,7 +323,6 @@ export async function addFeedback({ restaurantId, customerName, customerEmail,
         customer_name: customerName || 'Anonymous',
         customer_email: customerEmail || 'anonymous@example.com',
         feedback_message: feedbackText,
-        feedback_categories: feedbackCategories || (category ? [category] : []),
         rating_summary: ratingSummary || 'N/A'
       })
     });

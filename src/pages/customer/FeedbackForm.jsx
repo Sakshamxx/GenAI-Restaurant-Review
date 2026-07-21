@@ -1,66 +1,40 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { MessageSquareOff, Check, Heart, ArrowRight } from 'lucide-react'
+import { MessageSquareOff, Heart, ArrowRight } from 'lucide-react'
 import { submitFeedback } from '../../services/api.js'
-
-const COMPLAINT_TAGS = [
-  'Food Quality',
-  'Service Delay',
-  'Staff Behaviour',
-  'Cleanliness',
-  'Billing Issue',
-  'Noise Level',
-  'Other'
-];
 
 export default function FeedbackForm() {
   const navigate = useNavigate();
   const restaurantName = sessionStorage.getItem('reviewflow_restaurant_name') || 'your restaurant';
 
-  // Selections
-  const [selectedTags, setSelectedTags] = useState([]);
   const [comment, setComment] = useState('');
   const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
-    // Populate draft complaint if navigated from Page 2's negative experience flow
     const draft = sessionStorage.getItem('reviewflow_draft_complaint');
     if (draft) {
       setComment(draft);
-      // Clean up session storage
       sessionStorage.removeItem('reviewflow_draft_complaint');
     }
   }, []);
 
-  const toggleTag = (tag) => {
-    setSelectedTags(prev => 
-      prev.includes(tag) 
-        ? prev.filter(t => t !== tag) 
-        : [...prev, tag]
-    );
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!comment.trim() && selectedTags.length === 0) return;
+    if (!comment.trim()) return;
 
     let ratings = { food: 3, service: 3, ambience: 3 };
     const savedRatings = sessionStorage.getItem('reviewflow_ratings');
     if (savedRatings) ratings = JSON.parse(savedRatings);
 
     const restaurantId = sessionStorage.getItem('reviewflow_restaurant_id') || null;
-    const tableId = sessionStorage.getItem('reviewflow_table_id') || 'Unknown Table';
 
-    // Submit feedback via backend API
     if (restaurantId) {
       await submitFeedback({
         restaurantId,
         customerName: 'Anonymous',
         customerEmail: 'anonymous@example.com',
-        category: selectedTags[0] || 'General',
         feedbackText: comment,
-        feedbackCategories: selectedTags,
         ratingSummary: `Food: ${ratings.food}/5, Service: ${ratings.service}/5, Ambience: ${ratings.ambience}/5`
       });
     }
@@ -103,34 +77,6 @@ export default function FeedbackForm() {
                 </p>
               </div>
 
-              {/* Complaint Tags */}
-              <div className="flex flex-col gap-2">
-                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider font-display">
-                  Select Categories
-                </span>
-                <div className="flex flex-wrap gap-2">
-                  {COMPLAINT_TAGS.map(tag => {
-                    const isSelected = selectedTags.includes(tag);
-                    return (
-                      <motion.button
-                        key={tag}
-                        type="button"
-                        onClick={() => toggleTag(tag)}
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                        className={`py-2 px-3.5 rounded-full text-xs font-semibold flex items-center gap-1.5 border transition-all duration-200 cursor-pointer ${
-                          isSelected
-                            ? 'bg-brand-500 text-white border-brand-400/30 glow-purple'
-                            : 'border-white/10 hover:border-white/20 text-slate-400 hover:text-slate-200 bg-transparent'
-                        }`}
-                      >
-                        {isSelected && <Check className="w-3.5 h-3.5 stroke-[3px] text-white" />}
-                        <span>{tag}</span>
-                      </motion.button>
-                    );
-                  })}
-                </div>
-              </div>
 
               {/* Large Textarea */}
               <div className="flex flex-col gap-2">
@@ -181,11 +127,10 @@ export default function FeedbackForm() {
               <motion.button
                 onClick={() => {
                   setComment('');
-                  setSelectedTags([]);
                   setSubmitted(false);
                   // Navigate back to the review page, not to '/' which redirects to login
                   const rId = sessionStorage.getItem('reviewflow_restaurant_id');
-                  navigate(rId ? `/qr?restaurantId=${encodeURIComponent(rId)}` : '/qr');
+                  navigate(rId ? `/customer/review/${encodeURIComponent(rId)}` : '/qr');
                 }}
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}

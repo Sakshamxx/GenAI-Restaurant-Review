@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react'
+import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useOutletContext } from 'react-router-dom'
 import { QRCodeCanvas } from 'qrcode.react'
@@ -6,6 +6,7 @@ import {
   Download, RefreshCw, Loader2,
   ExternalLink, Copy, Check, AlertCircle, QrCode,
 } from 'lucide-react'
+import { generateQRCodes } from '../../services/api.js'
 
 // Unique canvas ID — used by toDataURL() for download
 const QR_CANVAS_ID = 'restaurant-qr-canvas';
@@ -19,19 +20,26 @@ export default function QRManagement() {
   const googleReviewLink = restaurant?.google_review_link || restaurant?.google_review_url || '';
 
   // The QR encodes the public review funnel URL. This must match the route registered in App.jsx.
-  const FRONTEND_BASE = (import.meta.env.VITE_APP_URL || import.meta.env.VITE_FRONTEND_URL || window.location.origin || '').replace(/\/$/, '');
-  const reviewFunnelUrl = restaurantId ? `${FRONTEND_BASE}/review/${restaurantId}` : '';
+  const FRONTEND_BASE = window.location.origin.replace(/\/$/, '');
+  const reviewFunnelUrl = restaurantId ? `${FRONTEND_BASE}/customer/review/${restaurantId}` : '';
+
+  console.log('[QRManagement] FRONTEND_BASE', FRONTEND_BASE)
+  console.log('[QRManagement] restaurantId', restaurantId)
+  console.log('[QRManagement] reviewFunnelUrl', reviewFunnelUrl)
 
   // ─── State ─────────────────────────────────────────────────────────────────
   const [downloading, setDownloading] = useState(false);
   const [copied, setCopied]           = useState(false);
   const [error, setError]             = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [backendMessage, setBackendMessage] = useState('');
+  const [backendQrUrl, setBackendQrUrl] = useState('');
   // qrKey forces a re-render of QRCodeCanvas when Regenerate is clicked
   const [qrKey, setQrKey]             = useState(0);
 
   // ─── Regenerate ────────────────────────────────────────────────────────────
   // No backend call — just forces QRCodeCanvas to re-render with current value.
-  const handleRegenerate = () => {
+  const handleRegenerate = async () => {
     if (!restaurantId) {
       setError('Restaurant data not loaded. Please refresh and try again.');
       return;
@@ -40,8 +48,27 @@ export default function QRManagement() {
       setError('Please add your Google Review URL in Settings first (required for the review funnel redirect).');
       return;
     }
+
     setError('');
-    setQrKey(k => k + 1);   // bump key → React remounts QRCodeCanvas → fresh render
+    setBackendMessage('');
+    setIsGenerating(true);
+
+    try {
+      const result = await generateQRCodes({ restaurantId, tableCount: 1 });
+      const remoteUrl = result?.qr_image_url || '';
+      if (remoteUrl) {
+        setBackendQrUrl(remoteUrl);
+        setBackendMessage('QR regenerated and saved successfully.');
+      } else {
+        setBackendMessage('QR regenerated successfully.');
+      }
+      setQrKey(k => k + 1);
+    } catch (err) {
+      console.error('[QRManagement] regenerate API failed', err);
+      setError('Could not regenerate QR code. Please try again later.');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   // ─── Download — canvas → PNG blob → anchor click ──────────────────────────
@@ -97,7 +124,7 @@ export default function QRManagement() {
       <div className="flex flex-col gap-8">
         <div>
           <h1 className="text-3xl font-display font-extrabold text-white tracking-tight">QR Code</h1>
-          <p className="text-sm text-slate-400 mt-1">Your restaurant QR code for Google Reviews.</p>
+          <p className="text-sm text-slate-400 mt-1">Your restaurant QR code for the ReviewFlow funnel.</p>
         </div>
         <div className="glass-panel rounded-3xl p-12 text-center border border-white/5 flex flex-col items-center gap-3">
           <Loader2 className="w-8 h-8 text-brand-400 animate-spin" />
@@ -126,16 +153,15 @@ export default function QRManagement() {
         <div className="flex gap-2">
           <motion.button
             onClick={handleRegenerate}
-            disabled={!hasUrl}
-            whileHover={{ scale: hasUrl ? 1.02 : 1 }}
-            whileTap={{ scale: hasUrl ? 0.98 : 1 }}
+            disabled={!hasUrl || isGenerating}
+            whileHover={{ scale: hasUrl && !isGenerating ? 1.02 : 1 }}
+            whileTap={{ scale: hasUrl && !isGenerating ? 0.98 : 1 }}
             title={!hasUrl ? 'Add a Google Review URL in Settings first' : 'Regenerate QR'}
             className="bg-white/5 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed text-slate-200 border border-white/10 rounded-xl py-2.5 px-4 font-display font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            <RefreshCw className="w-4 h-4" />
-            <span>Regenerate</span>
+            {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            <span>{isGenerating ? 'Regenerating…' : 'Regenerate'}</span>
           </motion.button>
-
           <motion.button
             onClick={handleDownload}
             disabled={!hasUrl || downloading}
@@ -182,7 +208,20 @@ export default function QRManagement() {
           </span>
         </div>
       )}
+      {backendMessage && (
+        <div className="bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 rounded-xl px-4 py-3 text-xs font-semibold">
+          {backendMessage}
+        </div>
+      )}
 
+      {backendQrUrl && (
+        <div className="bg-slate-950/70 border border-white/10 rounded-xl px-4 py-3 text-xs text-slate-300">
+          <span className="block font-semibold text-slate-200 mb-1">Backend QR Preview</span>
+          <a href={backendQrUrl} target="_blank" rel="noopener noreferrer" className="text-brand-300 hover:text-white underline break-all">
+            {backendQrUrl}
+          </a>
+        </div>
+      )}
       {/* Main Card */}
       <motion.div
         initial={{ opacity: 0, y: 15 }}
@@ -225,9 +264,8 @@ export default function QRManagement() {
           <div className="flex-1 flex flex-col gap-6 p-8">
             <div>
               <h2 className="text-xl font-display font-bold text-white">{restaurantName}</h2>
-              <p className="text-xs text-slate-400 mt-1">Google Review QR Code</p>
+              <p className="text-xs text-slate-400 mt-1">Review Funnel QR Code</p>
             </div>
-
             {/* QR Content — Funnel URL */}
             <div className="flex flex-col gap-1.5">
               <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest font-display">

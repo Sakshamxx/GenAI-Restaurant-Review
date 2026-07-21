@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles, ArrowRight, Edit3, CornerDownRight, Check } from 'lucide-react'
-import { generateSuggestions } from '../../services/api.js'
+import { generateSuggestions, submitReview } from '../../services/api.js'
 import { addFeedback, logActivity } from '../../services/supabase_db.js'
 
 export default function AISuggestions() {
@@ -53,6 +53,7 @@ export default function AISuggestions() {
     setPredictedSentiment(null);
 
     const restaurantId = sessionStorage.getItem('reviewflow_restaurant_id') || null;
+    console.log('[AISuggestions] restaurantId from storage:', restaurantId);
     const requestPayload = {
       restaurantId,
       reviewText: '',
@@ -120,7 +121,7 @@ export default function AISuggestions() {
         serviceRating: ratings.service,
         ambienceRating: ratings.ambience,
         reviewText: editableText,
-        redirectedToGoogle: true,
+        redirectedToGoogle: false,
       });
 
       // resp includes { success, message, review, ml, decision, suggestions }
@@ -130,6 +131,7 @@ export default function AISuggestions() {
           sessionStorage.setItem('reviewflow_copied_review', editableText);
           try { await navigator.clipboard.writeText(editableText); } catch {}
           const googleUrl = resp?.google_review_link || sessionStorage.getItem('reviewflow_google_url') || '';
+          console.log('[AISuggestions] positive_flow googleUrl:', googleUrl);
           setTimeout(async () => {
             if (restaurantId) {
               await logActivity({
@@ -140,11 +142,11 @@ export default function AISuggestions() {
                 reviewText: editableText
               });
             }
-            if (googleUrl) {
-              window.location.assign(googleUrl);
-            } else {
-              navigate('/success');
-            }
+            const redirectUrl = googleUrl || sessionStorage.getItem('reviewflow_google_url') || '';
+            const params = new URLSearchParams();
+            if (redirectUrl) params.set('destination', redirectUrl);
+            if (restaurantName) params.set('restaurantName', restaurantName);
+            navigate(`/redirect?${params.toString()}`, { replace: true });
           }, 1200);
           return;
         }

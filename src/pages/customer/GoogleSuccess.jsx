@@ -8,9 +8,37 @@ export default function GoogleSuccess() {
   const [countdown, setCountdown] = useState(4);
   const [redirectAttempted, setRedirectAttempted] = useState(false);
 
+  const searchParams = new URLSearchParams(window.location.search);
+  const restaurantIdParam = searchParams.get('restaurantId');
   const restaurantName = sessionStorage.getItem('reviewflow_restaurant_name') || 'Your Restaurant';
-  const googleUrl = sessionStorage.getItem('reviewflow_google_url') || '';
+  const storedGoogleUrl = sessionStorage.getItem('reviewflow_google_url') || '';
   const copiedReview = sessionStorage.getItem('reviewflow_copied_review') || '';
+  const [googleUrl, setGoogleUrl] = useState(storedGoogleUrl);
+  const restaurantId = restaurantIdParam || sessionStorage.getItem('reviewflow_restaurant_id') || '';
+
+  useEffect(() => {
+    console.log('[GoogleSuccess] restaurantId=', restaurantId, 'storedGoogleUrl=', storedGoogleUrl);
+    if (!googleUrl && restaurantId) {
+      window.fetch(`${window.location.origin}/api/qr/restaurant-lookup?restaurant_id=${encodeURIComponent(restaurantId)}`)
+        .then((res) => {
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`)
+          }
+          return res.json()
+        })
+        .then((data) => {
+          const found = data?.google_review_link || data?.google_review_url || '';
+          console.log('[GoogleSuccess] fetched google review link:', found);
+          if (found) {
+            sessionStorage.setItem('reviewflow_google_url', found);
+            setGoogleUrl(found);
+          }
+        })
+        .catch((err) => {
+          console.warn('[GoogleSuccess] Could not fetch google review link:', err);
+        });
+    }
+  }, [googleUrl, restaurantId, storedGoogleUrl]);
 
   useEffect(() => {
     if (!googleUrl || redirectAttempted) return;
@@ -33,6 +61,16 @@ export default function GoogleSuccess() {
   const handleManualRedirect = () => {
     if (googleUrl) {
       window.location.assign(googleUrl);
+    } else if (restaurantId) {
+      window.location.assign(`/customer/review/${encodeURIComponent(restaurantId)}`);
+    }
+  };
+
+  const handleRateAnother = () => {
+    if (restaurantId) {
+      navigate(`/customer/review/${encodeURIComponent(restaurantId)}`);
+    } else {
+      navigate('/qr');
     }
   };
 
@@ -98,7 +136,7 @@ export default function GoogleSuccess() {
         </div>
 
         <motion.button
-          onClick={() => navigate('/qr')}
+          onClick={handleRateAnother}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           className="bg-white/5 hover:bg-white/10 text-slate-400 hover:text-slate-200 border border-white/10 rounded-xl py-2 px-5 text-xs font-semibold transition-all cursor-pointer"

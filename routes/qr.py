@@ -2,17 +2,15 @@
 ReviewFlow AI — QR Code Routes
 Handles generation, download, preview, list, and statistics of restaurant QR codes.
 
-QR content is always restaurant.google_review_link — never a hardcoded localhost URL.
+QR content is the restaurant review funnel URL built from FRONTEND_ORIGIN.
 """
 
 import re
-import uuid
-import httpx
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Request
 from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel
 from services.supabase_service import supabase_client
-from services.qr_service import generate_qr_png
+from services.qr_service import generate_qr_png, build_review_funnel_url
 
 router = APIRouter(prefix="/api/qr", tags=["qr"])
 
@@ -28,11 +26,6 @@ def _get_restaurant(restaurant_id: str) -> dict:
     Fetch the full restaurant row from Supabase.
     Raises 404 if not found.
     """
-    try:
-        uuid.UUID(restaurant_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="restaurant_id must be a valid UUID") from exc
-
     if supabase_client is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Supabase is not configured for this deployment.")
 
@@ -65,9 +58,9 @@ async def list_qr_codes(owner_id: str):
             qr_res   = supabase_client.table("qr_codes").select("*").eq("restaurant_id", r_id).execute()
             qr_data  = qr_res.data[0] if qr_res.data else None
 
-            rev_res      = supabase_client.table("reviews").select("redirected_to_google").eq("restaurant_id", r_id).execute()
+            rev_res      = supabase_client.table("reviews").select("redirected_to_google, google_redirected").eq("restaurant_id", r_id).execute()
             review_count  = len(rev_res.data) if rev_res.data else 0
-            redirect_count = sum(1 for x in rev_res.data if x.get("redirected_to_google")) if rev_res.data else 0
+            redirect_count = sum(1 for x in (rev_res.data or []) if x.get("redirected_to_google") or x.get("google_redirected"))
 
             feed_res      = supabase_client.table("feedback").select("id").eq("restaurant_id", r_id).execute()
             feedback_count = len(feed_res.data) if feed_res.data else 0
@@ -105,14 +98,14 @@ async def get_restaurants(owner_id: str):
 
 
 @router.post("/generate")
-async def generate_qr(request: QRGenerateRequest):
+async def generate_qr(payload: QRGenerateRequest, request: Request):
     """
     Generate (or regenerate) a QR code for a restaurant.
-    QR encodes restaurant.google_review_link.
+    QR encodes the restaurant review funnel URL.
     Uploads PNG to Supabase Storage and upserts qr_codes record.
     """
     try:
-        restaurant    = _get_restaurant(request.restaurant_id)
+        restaurant    = _get_restaurant(payload.restaurant_id)
         restaurant_id = restaurant["id"]
         restaurant_name = restaurant["restaurant_name"]
         google_review_link = restaurant.get("google_review_link", "")
@@ -126,7 +119,8 @@ async def generate_qr(request: QRGenerateRequest):
         if not google_review_link.startswith(('http://', 'https://')):
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="google_review_link must be a valid absolute URL")
 
-        qr_bytes = generate_qr_png(qr_url=google_review_link, restaurant_name=restaurant_name)
+        review_funnel_url = build_review_funnel_url(restaurant_id, request.headers.get('origin'))
+        qr_bytes = generate_qr_png(qr_url=review_funnel_url, restaurant_name=restaurant_name)
 
         # Upload to Supabase Storage (overwrite existing)
         file_path = f"qr_{restaurant_id}.png"
@@ -160,7 +154,8 @@ async def generate_qr(request: QRGenerateRequest):
             "success":       True,
             "message":       "QR Code generated successfully.",
             "qr_image_url":  public_url,
-            "qr_content":    google_review_link,
+            "qr_content":    review_funnel_url,
+            "google_review_link": google_review_link,
         })
 
     except HTTPException:
@@ -171,10 +166,10 @@ async def generate_qr(request: QRGenerateRequest):
 
 
 @router.get("/preview/{restaurant_id}")
-async def preview_qr(restaurant_id: str):
+async def preview_qr(restaurant_id: str, request: Request):
     """
     Return a QR code PNG for inline preview.
-    QR encodes restaurant.google_review_link.
+    QR encodes the restaurant review funnel URL.
     """
     try:
         restaurant         = _get_restaurant(restaurant_id)
@@ -187,8 +182,9 @@ async def preview_qr(restaurant_id: str):
                 detail="google_review_link not set. Add it in Settings.",
             )
 
-        print(f"[preview_qr] restaurant_id={restaurant_id} url={google_review_link}")
-        qr_bytes = generate_qr_png(qr_url=google_review_link, restaurant_name=restaurant_name)
+        review_funnel_url = build_review_funnel_url(restaurant_id, request.headers.get('origin'))
+        print(f"[preview_qr] restaurant_id={restaurant_id} url={review_funnel_url}")
+        qr_bytes = generate_qr_png(qr_url=review_funnel_url, restaurant_name=restaurant_name)
 
         return Response(
             content=qr_bytes,
@@ -205,16 +201,16 @@ async def preview_qr(restaurant_id: str):
 # Keep the old token-based preview route as an alias so existing cached
 # image src URLs in the browser don't immediately 404.
 @router.get("/preview/{restaurant_id}/{token}")
-async def preview_qr_with_token(restaurant_id: str, token: str):
+async def preview_qr_with_token(restaurant_id: str, token: str, request: Request):
     """Legacy route — token param is ignored; delegates to preview_qr."""
-    return await preview_qr(restaurant_id)
+    return await preview_qr(restaurant_id, request)
 
 
 @router.get("/download/{restaurant_id}")
-async def download_qr(restaurant_id: str):
+async def download_qr(restaurant_id: str, request: Request):
     """
     Download the QR code PNG.
-    QR encodes restaurant.google_review_link.
+    QR encodes the restaurant review funnel URL.
     Filename: {restaurant-name}-qr.png
     """
     try:
@@ -228,8 +224,9 @@ async def download_qr(restaurant_id: str):
                 detail="google_review_link not set. Add it in Settings before downloading.",
             )
 
-        print(f"[download_qr] restaurant_id={restaurant_id} url={google_review_link}")
-        qr_bytes = generate_qr_png(qr_url=google_review_link, restaurant_name=restaurant_name)
+        review_funnel_url = build_review_funnel_url(restaurant_id, request.headers.get('origin'))
+        print(f"[download_qr] restaurant_id={restaurant_id} url={review_funnel_url}")
+        qr_bytes = generate_qr_png(qr_url=review_funnel_url, restaurant_name=restaurant_name)
 
         safe_name = re.sub(r"[^a-z0-9\-]", "", restaurant_name.lower().replace(" ", "-"))
         filename  = f"{safe_name or 'restaurant'}-qr.png"
@@ -251,9 +248,9 @@ async def download_qr(restaurant_id: str):
 
 # Legacy token-based download — delegates to the clean route.
 @router.get("/download/{restaurant_id}/{token}")
-async def download_qr_with_token(restaurant_id: str, token: str):
+async def download_qr_with_token(restaurant_id: str, token: str, request: Request):
     """Legacy route — token param is ignored; delegates to download_qr."""
-    return await download_qr(restaurant_id)
+    return await download_qr(restaurant_id, request)
 
 
 @router.delete("/{restaurant_id}")
@@ -311,4 +308,26 @@ async def increment_scans(restaurant_id: str):
         })
     except Exception as e:
         print(f"[increment_scans] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/restaurant-lookup")
+async def restaurant_lookup(restaurant_id: str):
+    """Return restaurant name and Google review URL by restaurant ID."""
+    if supabase_client is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Supabase is not configured for this deployment.")
+
+    try:
+        res = supabase_client.table("restaurants").select("restaurant_name, google_review_link").eq("id", restaurant_id).maybeSingle().execute()
+        if not res.data:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Restaurant {restaurant_id} not found.")
+        return JSONResponse({
+            "restaurant_id": restaurant_id,
+            "restaurant_name": res.data.get("restaurant_name", ""),
+            "google_review_link": res.data.get("google_review_link", ""),
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[restaurant_lookup] Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

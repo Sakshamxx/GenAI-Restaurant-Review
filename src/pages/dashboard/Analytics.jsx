@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useOutletContext } from 'react-router-dom'
-import { BarChart3, Sparkles, Star, Loader2, TrendingUp, RefreshCw } from 'lucide-react'
+import { BarChart3, Sparkles, Loader2, TrendingUp, RefreshCw } from 'lucide-react'
 import { getRestaurantStats, getReviews, getFeedback } from '../../services/supabase_db.js'
-import { getAnalytics, getActivityLogs } from '../../services/api.js'
 import { Toast, apiCall } from '../../lib/errorHandler.js'
 import {
   BarChart,
@@ -16,9 +15,7 @@ import {
   ResponsiveContainer,
   PieChart,
   Pie,
-  Legend,
-  LineChart,
-  Line
+  Legend
 } from 'recharts'
 
 export default function Analytics() {
@@ -28,10 +25,8 @@ export default function Analytics() {
   const [stats, setStats] = useState({ redirects: 0, totalFeedback: 0, totalReviews: 0, avgRating: 0 });
   const [reviews, setReviews] = useState([]);
   const [feedback, setFeedback] = useState([]);
-  const [activities, setActivities] = useState([])
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [timeRange, setTimeRange] = useState('month')
 
   const loadAnalytics = async () => {
     if (!restaurantId) {
@@ -51,14 +46,6 @@ export default function Analytics() {
             getFeedback(restaurantId),
           ]);
           
-          // Also try to get activities from API
-          try {
-            const act = await getActivityLogs(restaurantId)
-            setActivities(act.slice(0, 10))
-          } catch (e) {
-            console.log('Activities not available from API')
-          }
-          
           setStats(s);
           setReviews(r);
           setFeedback(f);
@@ -77,13 +64,15 @@ export default function Analytics() {
 
   useEffect(() => {
     loadAnalytics();
-  }, [restaurantId, timeRange]);
+  }, [restaurantId]);
+
+  const NO_FEEDBACK_MESSAGE = 'No customer feedback has been received yet.'
 
   // ── Chart 1: Sentiment Distribution (from ML-labelled reviews) ──────────────
   const sentimentData = (() => {
     const counts = { Positive: 0, Neutral: 0, Negative: 0 };
     reviews.forEach(r => {
-      const s = (r.sentiment || '').toLowerCase();
+      const s = (r.sentiment || r.sentiment_prediction || r.sentiment_label || '').toLowerCase();
       if (s === 'positive') counts.Positive++;
       else if (s === 'neutral') counts.Neutral++;
       else if (s === 'negative') counts.Negative++;
@@ -96,33 +85,12 @@ export default function Analytics() {
     ].filter(d => d.value > 0);
   })();
 
-  // ── Chart 2: Aspect avg ratings ──────────────────────────────────────────
-  const aspectRatings = (() => {
-    if (reviews.length === 0) return [];
-    const sum = { food: 0, service: 0, ambience: 0 };
-    let count = 0;
-    reviews.forEach(r => {
-      if (r.food_rating || r.service_rating || r.ambience_rating) {
-        sum.food    += r.food_rating    || 0;
-        sum.service += r.service_rating || 0;
-        sum.ambience += r.ambience_rating || 0;
-        count++;
-      }
-    });
-    if (count === 0) return [];
-    return [
-      { name: 'Food Quality', Rating: parseFloat((sum.food    / count).toFixed(1)) },
-      { name: 'Service',      Rating: parseFloat((sum.service / count).toFixed(1)) },
-      { name: 'Ambience',     Rating: parseFloat((sum.ambience / count).toFixed(1)) },
-    ];
-  })();
-
   // ── Chart 3: Complaint category frequency ─────────────────────────────────
   const categoryData = (() => {
     const counts = {};
     const colors = ['#f43f5e', '#fb923c', '#fbbf24', '#2dd4bf', '#a78bfa', '#38bdf8', '#34d399'];
     feedback.forEach(f => {
-      const cat = f.category || 'Other';
+      const cat = f.category || 'Private Feedback';
       counts[cat] = (counts[cat] || 0) + 1;
     });
     return Object.entries(counts)
@@ -130,18 +98,7 @@ export default function Analytics() {
       .map(([name, Count], i) => ({ name, Count, color: colors[i % colors.length] }));
   })();
 
-  // ── Chart 4: Severity breakdown ────────────────────────────────────────────
-  const severityData = (() => {
-    const counts = { Low: 0, Medium: 0, High: 0, Critical: 0 };
-    feedback.forEach(f => {
-      const sev = f.severity;
-      if (sev in counts) counts[sev]++;
-    });
-    const colors = { Low: '#34d399', Medium: '#fbbf24', High: '#fb923c', Critical: '#f43f5e' };
-    return Object.entries(counts)
-      .filter(([, v]) => v > 0)
-      .map(([name, value]) => ({ name, value, color: colors[name] }));
-  })();
+  const feedbackCount = feedback.length;
 
   const tooltipStyle = {
     contentStyle: {
@@ -152,7 +109,10 @@ export default function Analytics() {
     }
   };
 
-  const noData = !loading && reviews.length === 0 && feedback.length === 0;
+  const noData = !loading && stats.totalReviews === 0 && stats.totalFeedback === 0;
+
+  const positiveCount = sentimentData.find(d => d.name === 'Positive')?.value || 0;
+  const negativeCount = sentimentData.find(d => d.name === 'Negative')?.value || 0;
 
   // ── Header with refresh button ──────────────────────────────────────────────
   const headerSection = (
@@ -162,19 +122,6 @@ export default function Analytics() {
         <p className="text-sm text-slate-400 mt-1">Deep analysis of customer sentiment and operational metrics.</p>
       </div>
       <div className="flex gap-2">
-        {['week', 'month', 'all'].map(range => (
-          <button
-            key={range}
-            onClick={() => setTimeRange(range)}
-            className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
-              timeRange === range
-                ? 'bg-blue-500 text-white shadow-lg'
-                : 'bg-gray-700 text-gray-200 hover:bg-gray-600'
-            }`}
-          >
-            {range === 'week' ? 'Week' : range === 'month' ? 'Month' : 'All'}
-          </button>
-        ))}
         <button
           onClick={loadAnalytics}
           disabled={loading}
@@ -207,17 +154,65 @@ export default function Analytics() {
       {noData && (
         <div className="glass-panel rounded-3xl p-12 text-center border border-white/5 flex flex-col items-center gap-3">
           <BarChart3 className="w-10 h-10 text-slate-600" />
-          <span className="text-sm font-semibold text-slate-400 font-display">No analytics data yet</span>
+          <span className="text-sm font-semibold text-slate-400 font-display">{NO_FEEDBACK_MESSAGE}</span>
           <p className="text-xs text-slate-500 max-w-xs mx-auto">
-            Analytics will populate once customers start scanning your QR codes and submitting reviews.
+            Please encourage customers to scan the QR code and submit a review or feedback.
           </p>
         </div>
       )}
 
       {!loading && !noData && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
+            <motion.div
+              initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
+              className="glass-panel rounded-3xl p-5 border border-white/5"
+            >
+              <span className="text-xs uppercase tracking-[0.26em] text-slate-400">Total Reviews</span>
+              <p className="mt-4 text-4xl font-extrabold text-white">{stats.totalReviews}</p>
+              <p className="text-xs text-slate-500 mt-2">All submitted customer reviews.</p>
+            </motion.div>
 
-          {/* Chart 1: Sentiment Distribution Pie */}
+            <motion.div
+              initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
+              className="glass-panel rounded-3xl p-5 border border-white/5"
+            >
+              <span className="text-xs uppercase tracking-[0.26em] text-slate-400">Average Rating</span>
+              <p className="mt-4 text-4xl font-extrabold text-white">{stats.avgRating?.toFixed(1) ?? '0.0'}★</p>
+              <p className="text-xs text-slate-500 mt-2">Customer review rating average.</p>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
+              className="glass-panel rounded-3xl p-5 border border-white/5"
+            >
+              <span className="text-xs uppercase tracking-[0.26em] text-slate-400">Positive Reviews</span>
+              <p className="mt-4 text-4xl font-extrabold text-white">{positiveCount}</p>
+              <p className="text-xs text-slate-500 mt-2">Positive customer sentiment.</p>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
+              className="glass-panel rounded-3xl p-5 border border-white/5"
+            >
+              <span className="text-xs uppercase tracking-[0.26em] text-slate-400">Negative Reviews</span>
+              <p className="mt-4 text-4xl font-extrabold text-white">{negativeCount}</p>
+              <p className="text-xs text-slate-500 mt-2">Negative customer sentiment.</p>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
+              className="glass-panel rounded-3xl p-5 border border-white/5"
+            >
+              <span className="text-xs uppercase tracking-[0.26em] text-slate-400">Feedback Items</span>
+              <p className="mt-4 text-4xl font-extrabold text-white">{stats.totalFeedback}</p>
+              <p className="text-xs text-slate-500 mt-2">Private complaint submissions.</p>
+            </motion.div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-6">
+
+            {/* Chart 1: Sentiment Distribution Pie */}
           <motion.div
             initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
             className="glass-panel rounded-3xl p-5 md:p-6 border border-white/5 flex flex-col"
@@ -252,46 +247,11 @@ export default function Analytics() {
                   </PieChart>
                 </ResponsiveContainer>
               ) : (
-                <span className="text-slate-500 italic text-xs">No ML sentiment data yet — submit reviews first.</span>
+                <span className="text-slate-500 italic text-xs">{NO_FEEDBACK_MESSAGE}</span>
               )}
             </div>
           </motion.div>
 
-          {/* Chart 2: Aspect Ratings */}
-          <motion.div
-            initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="glass-panel rounded-3xl p-5 md:p-6 border border-white/5"
-          >
-            <div className="mb-4">
-              <h2 className="text-lg font-display font-bold text-white flex items-center gap-2">
-                <Star className="w-4 h-4 text-brand-400" />
-                <span>Aspect Ratings (Out of 5.0)</span>
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5">Average customer scores grouped by restaurant category.</p>
-            </div>
-            <div className="h-64 text-xs">
-              {aspectRatings.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={aspectRatings} layout="vertical" margin={{ left: -10, right: 10, top: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.02)" horizontal={false} />
-                    <XAxis type="number" domain={[0, 5]} stroke="rgba(255,255,255,0.4)" tickLine={false} axisLine={false} />
-                    <YAxis type="category" dataKey="name" stroke="rgba(255,255,255,0.4)" tickLine={false} axisLine={false} width={80} />
-                    <Tooltip {...tooltipStyle} />
-                    <Bar dataKey="Rating" radius={[0, 6, 6, 0]}>
-                      {aspectRatings.map((entry, i) => (
-                        <Cell key={i} fill={entry.Rating >= 4.3 ? '#7620BF' : '#a78bfa'} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-full flex items-center justify-center">
-                  <span className="text-slate-500 italic text-xs">No aspect rating data yet.</span>
-                </div>
-              )}
-            </div>
-          </motion.div>
 
           {/* Chart 3: Complaint Category Frequency */}
           <motion.div
@@ -323,13 +283,12 @@ export default function Analytics() {
                 </ResponsiveContainer>
               ) : (
                 <div className="h-full flex items-center justify-center">
-                  <span className="text-slate-500 italic text-xs">No complaint data yet.</span>
+                  <span className="text-slate-500 italic text-xs">{NO_FEEDBACK_MESSAGE}</span>
                 </div>
               )}
             </div>
           </motion.div>
 
-          {/* Chart 4: Severity Breakdown */}
           <motion.div
             initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
@@ -338,48 +297,20 @@ export default function Analytics() {
             <div className="mb-4">
               <h2 className="text-lg font-display font-bold text-white flex items-center gap-2">
                 <TrendingUp className="w-4 h-4 text-brand-400" />
-                <span>Severity Breakdown</span>
+                <span>Feedback Volume</span>
               </h2>
-              <p className="text-xs text-slate-400 mt-0.5">ML-predicted severity levels across all private feedback.</p>
+              <p className="text-xs text-slate-400 mt-0.5">Private feedback submissions captured in the dashboard.</p>
             </div>
             <div className="h-64 flex items-center justify-center">
-              {severityData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={severityData}
-                      cx="50%" cy="50%"
-                      innerRadius={55} outerRadius={80}
-                      paddingAngle={4} dataKey="value"
-                    >
-                      {severityData.map((entry, i) => (
-                        <Cell key={i} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip {...tooltipStyle} />
-                    <Legend
-                      formatter={(value) => <span style={{ color: '#94a3b8', fontSize: '11px' }}>{value}</span>}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <span className="text-slate-500 italic text-xs">No severity data yet.</span>
-              )}
-            </div>
-            {/* Severity legend pills */}
-            {severityData.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-2 pt-3 border-t border-white/5">
-                {severityData.map(s => (
-                  <div key={s.name} className="flex items-center gap-1.5 text-xs font-semibold">
-                    <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
-                    <span className="text-slate-300">{s.name}: {s.value}</span>
-                  </div>
-                ))}
+              <div className="text-center">
+                <div className="text-4xl font-semibold text-white">{feedbackCount}</div>
+                <div className="mt-2 text-sm text-slate-400">feedback entries</div>
               </div>
-            )}
+            </div>
           </motion.div>
 
         </div>
+        </>
       )}
     </div>
   );

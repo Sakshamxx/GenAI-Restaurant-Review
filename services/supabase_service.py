@@ -4,6 +4,7 @@ Initializes the administrative Supabase client using the service role key.
 """
 
 import os
+import re
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
@@ -33,6 +34,14 @@ if supabase_key:
 if not supabase_url or not supabase_key or _has_placeholder_value(supabase_url) or _has_placeholder_value(supabase_key):
     print("[supabase_service] Warning: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing or still placeholder. Supabase client will not be created.")
     supabase_client = None
+
+    def safe_insert(table: str, record: dict, client=None):
+        print(f"[supabase_service] safe_insert: supabase client not configured; cannot insert into {table}")
+        return None
+
+    def safe_select(table: str, query_builder=None, client=None):
+        print(f"[supabase_service] safe_select: supabase client not configured; cannot query {table}")
+        return None
 else:
     # Service role client bypasses RLS for administrative backend operations
     supabase_client: Client = create_client(supabase_url, supabase_key)
@@ -48,27 +57,58 @@ else:
         if cli is None:
             print(f"[supabase_service] safe_insert: supabase client not configured; cannot insert into {table}")
             return None
+
+        def _extract_error(resp):
+            if getattr(resp, "error", None):
+                return str(resp.error)
+            if getattr(resp, "status_code", None) and getattr(resp, "status_code", None) >= 400:
+                return str(getattr(resp, "error", "")) or str(resp)
+            return ""
         
         try:
             res = cli.table(table).insert(record).execute()
+            if getattr(res, "error", None):
+                raise RuntimeError(_extract_error(res))
             return res.data[0] if getattr(res, "data", None) else None
         except Exception as e:
             error_str = str(e).lower()
-            # If the error is about a missing column, retry with only essential fields
+            # If the error is about a missing column, attempt schema-aware fallbacks.
             if "could not find" in error_str and "column" in error_str:
+                missing_columns = re.findall(r'column "([^"]+)"', error_str)
+                if missing_columns:
+                    aliased_record = dict(record)
+                    if "redirected_to_google" in missing_columns and "google_redirected" in aliased_record:
+                        aliased_record.pop("redirected_to_google", None)
+                    elif "google_redirected" in missing_columns and "redirected_to_google" in aliased_record:
+                        aliased_record.pop("google_redirected", None)
+
+                    if aliased_record != record:
+                        try:
+                            res = cli.table(table).insert(aliased_record).execute()
+                            if getattr(res, "error", None):
+                                raise RuntimeError(_extract_error(res))
+                            print(f"[supabase_service] Schema alias retry succeeded for table {table}")
+                            return res.data[0] if getattr(res, "data", None) else None
+                        except Exception as alias_err:
+                            print(f"[supabase_service] Alias retry also failed: {alias_err}")
+
                 print(f"[supabase_service] Schema mismatch for table {table}. Retrying with core fields only.")
                 # Core fields that should always exist
                 core_fields = {
-                    "id", "restaurant_id", "review_text", "user_rating", 
+                    "id", "restaurant_id", "review_text", "user_rating",
                     "food_rating", "service_rating", "ambience_rating",
-                    "customer_name", "customer_email", "feedback_text", "feedback_message",
-                    "activity_type", "rating", "metadata",
-                    "created_at", "updated_at"
+                    "google_redirected", "redirected_to_google",
+                    "route_decision", "decision_reason", "sentiment_prediction",
+                    "sentiment_confidence", "customer_name", "customer_email",
+                    "feedback_text", "feedback_message", "activity_type", "rating",
+                    "metadata", "created_at", "updated_at"
                 }
                 filtered_record = {k: v for k, v in record.items() if k in core_fields}
                 if filtered_record and filtered_record != record:
                     try:
                         res = cli.table(table).insert(filtered_record).execute()
+                        if getattr(res, "error", None):
+                            raise RuntimeError(_extract_error(res))
                         print(f"[supabase_service] Retry succeeded with {len(filtered_record)} fields")
                         return res.data[0] if getattr(res, "data", None) else None
                     except Exception as retry_err:

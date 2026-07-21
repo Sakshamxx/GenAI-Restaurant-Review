@@ -80,7 +80,7 @@ export default function Overview() {
       const match = result.find(r => r.date === logDate.toDateString());
       if (!match) return;
       if (log.activity_type === 'qr_scanned') match.Scans += 1;
-      if (['positive_review', 'review_generated'].includes(log.activity_type)) match.Reviews += 1;
+      if (log.activity_type === 'review_submitted') match.Reviews += 1;
     });
     return result;
   }, [activityLogs]);
@@ -96,9 +96,9 @@ export default function Overview() {
       bgColor: 'bg-brand-500/10 border-brand-500/20'
     },
     {
-      title: 'Reviews Generated',
+      title: 'Customer Reviews',
       value: stats.totalReviews,
-      description: 'Drafts authored by AI',
+      description: 'Actual reviews submitted via your QR flow',
       change: `avg ${stats.avgRating}★`,
       icon: TrendingUp,
       color: 'text-emerald-400',
@@ -269,9 +269,9 @@ export default function Overview() {
                 <div key={feed.id} className="text-xs flex flex-col gap-1 border-b border-white/[0.02] pb-2 last:border-b-0">
                   <div className="flex justify-between items-center">
                     <span className="bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded px-1.5 py-0.2 text-[9px] font-semibold">
-                      {feed.category}
+                      {feed.category || 'Private Feedback'}
                     </span>
-                    <span className="text-[10px] text-slate-500">{feed.severity}</span>
+                    <span className="text-[10px] text-slate-500">{feed.severity || 'Open'}</span>
                   </div>
                   <p className="text-slate-300 truncate font-medium">"{feed.feedback_text}"</p>
                 </div>

@@ -7,7 +7,7 @@ and owner authentication via Supabase.
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from services.supabase_service import supabase_client
-from services.qr_service import generate_qr_png
+from services.qr_service import generate_qr_png, build_review_funnel_url
 
 
 def _require_supabase_client():
@@ -96,8 +96,8 @@ async def signup(request: SignupRequest):
         restaurant_id = rest_insert.data[0]["id"]
         restaurant_name = rest_insert.data[0]["restaurant_name"]
 
-        # 3. Generate QR code image
-        qr_bytes = generate_qr_png(restaurant_id, restaurant_name)
+        # 3. Generate QR code image for the customer review funnel
+        qr_bytes = generate_qr_png(build_review_funnel_url(restaurant_id), restaurant_name)
 
         # Upload QR image to Supabase Storage in 'qr-codes' bucket
         file_path = f"qr_{restaurant_id}.png"

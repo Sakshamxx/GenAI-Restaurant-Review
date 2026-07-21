@@ -59,30 +59,31 @@ def _build_prompt(
     service_tag_str = ", ".join(service_tags) if service_tags else "none selected"
     ambience_tag_str = ", ".join(ambience_tags) if ambience_tags else "none selected"
 
-    prompt = f"""You are helping a restaurant customer write a Google review based on their dining experience.
+    prompt = f"""
+Generate exactly 3 short Google review suggestions.
 
-Customer Ratings (out of 5 stars):
-- Food: {food_rating}/5
-- Service: {service_rating}/5
-- Ambience: {ambience_rating}/5
+Food Rating: {food_rating}/5
+Service Rating: {service_rating}/5
+Ambience Rating: {ambience_rating}/5
 
-Customer Selected Tags:
-- Food: {food_tag_str}
-- Service: {service_tag_str}
-- Ambience: {ambience_tag_str}
+Food Tags: {food_tag_str}
+Service Tags: {service_tag_str}
+Ambience Tags: {ambience_tag_str}
 
-Overall tone should be: {tone}
+Rules:
+- Keep each review 1-2 sentences.
+- Mention food, service, and ambience based on the ratings.
+- Use the selected tags naturally.
+- Simple and direct language.
+- No storytelling.
+- No exaggerated praise.
+- Return only a JSON array with 3 reviews.
 
-Generate exactly 3 short, natural-sounding restaurant reviews. Each review must:
-1. Be 80-120 words maximum
-2. Sound like it was written by a real customer (not AI)
-3. Reflect the actual ratings - if food is rated {food_rating}/5, the food comment must reflect that
-4. Naturally incorporate the selected tags where relevant
-5. Have a distinctly different writing style from the other two (e.g., casual, professional, storytelling)
-6. Be suitable for posting on Google Reviews
-
-Return ONLY a JSON array of exactly 3 strings, no explanation, no labels, no markdown:
-["review1 text here", "review2 text here", "review3 text here"]"""
+Example:
+["Great food and friendly service. The ambience was pleasant.",
+ "The food was tasty and the staff was helpful. Nice atmosphere overall.",
+ "Good dining experience. Enjoyed the food, service, and ambience."]
+"""
 
     return prompt
 
